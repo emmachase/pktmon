@@ -1,13 +1,13 @@
 use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, thread};
 
-use pktmon::{filter::{PktMonFilter, TransportProtocol}, Sniffer};
+use pktmon::{filter::{PktMonFilter, TransportProtocol}, Capture};
 
 fn main() {
     colog::default_builder()
         .filter_level(log::LevelFilter::Trace)
         .init();
 
-    let mut sniffer = Sniffer::new().unwrap();
+    let mut sniffer = Capture::new().unwrap();
 
     sniffer.add_filter(PktMonFilter {
         name: "RQA - 1".to_string(),

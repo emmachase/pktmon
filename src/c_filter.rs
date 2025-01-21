@@ -4,15 +4,14 @@ use cidr::AnyIpCidr;
 
 use crate::filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol};
 
+/*
+ * NOTE: When two MACs, IPs, or ports are specified, the filter
+ *  matches packets that contain both. It will not distinguish between source
+ *  or destination for this purpose.
+ */
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CPktMonFilter {
-    /*
-        NOTE: When two MACs, IPs, or ports are specified, the filter
-           matches packets that contain both. It will not distinguish between source
-           or destination for this purpose.
-    */
-
     // Offset 0x00-0x7F: Name/Description field (128 bytes)
     pub name: [u8; 128],          // 128 bytes (doubled from 64 for wide chars) UTF-16LE
 
@@ -286,30 +285,37 @@ impl From<PktMonFilter> for CPktMonFilter {
             name: {
                 let mut arr = [0u8; 128];
                 
-                let bytes = OsStr::new(&filter.name)
+                let mut bytes = OsStr::new(&filter.name)
                     .encode_wide()
                     .flat_map(|x| x.to_le_bytes())
                     .collect::<Vec<u8>>();
+
+                // Leave 2 bytes for the NULL terminator
+                if bytes.len() > 126 {
+                    bytes = bytes[..126].to_vec();
+                }
 
                 arr[..bytes.len()].copy_from_slice(&bytes);
                 arr
             },
 
             mac_src: {
-                if let Some(mac_src) = filter.mac_src {
-                    flags.set_mac_src(true);
-                    CMacAddr { addr: mac_src.0 }
-                } else {
-                    CMacAddr { addr: [0; 6] }
+                match filter.mac.first() {
+                    Some(&mac) => {
+                        flags.set_mac_src(true);
+                        CMacAddr { addr: mac.0 }
+                    }
+                    None => CMacAddr { addr: [0; 6] }
                 }
             },
 
             mac_dst: {
-                if let Some(mac_dst) = filter.mac_dst {
-                    flags.set_mac_dst(true);
-                    CMacAddr { addr: mac_dst.0 }
-                } else {
-                    CMacAddr { addr: [0; 6] }
+                match filter.mac.second() {
+                    Some(&mac) => {
+                        flags.set_mac_dst(true);
+                        CMacAddr { addr: mac.0 }
+                    }
+                    None => CMacAddr { addr: [0; 6] }
                 }
             },
 
@@ -350,12 +356,6 @@ impl From<PktMonFilter> for CPktMonFilter {
             },
 
             ip_src: {
-                // if !filter.ip_src.is_any() {
-                //     flags.set_ip_src(true);
-                //     CIPAddr::try_from(filter.ip_src).unwrap()
-                // } else {
-                //     CIPAddr { v6: CIPv6Addr { addr: [0; 8] } }
-                // }
                 match filter.ip.first() {
                     Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
                     Some(&ip) => {
@@ -366,12 +366,6 @@ impl From<PktMonFilter> for CPktMonFilter {
             },
 
             ip_dst: {
-                // if !filter.ip_dst.is_any() {
-                //     flags.set_ip_dst(true);
-                //     CIPAddr::try_from(filter.ip_dst).unwrap()
-                // } else {
-                //     CIPAddr { v6: CIPv6Addr { addr: [0; 8] } }
-                // }
                 match filter.ip.second() {
                     Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
                     Some(&ip) => {
@@ -382,12 +376,6 @@ impl From<PktMonFilter> for CPktMonFilter {
             },
 
             ip_src_prefix: {
-                // if let Some(prefix) = filter.ip_src.network_length() {
-                //     flags.set_ip_src_prefix(prefix > 0);
-                //     prefix
-                // } else {
-                //     0
-                // }
                 match filter.ip.first() {
                     Some(AnyIpCidr::Any) | None => 0,
                     Some(&ip) => {
@@ -398,12 +386,6 @@ impl From<PktMonFilter> for CPktMonFilter {
             },
 
             ip_dst_prefix: {
-                // if let Some(prefix) = filter.ip_dst.network_length() {
-                //     flags.set_ip_dst_prefix(prefix > 0);
-                //     prefix
-                // } else {
-                //     0
-                // }
                 match filter.ip.second() {
                     Some(AnyIpCidr::Any) | None => 0,
                     Some(&ip) => {
@@ -414,12 +396,6 @@ impl From<PktMonFilter> for CPktMonFilter {
             },
 
             port_src: {
-                // if let Some(port_src) = filter.port_src {
-                //     flags.set_port_src(true);
-                //     port_src
-                // } else {
-                //     0
-                // }
                 match filter.port.first() {
                     Some(&port) => {
                         flags.set_port_src(true);
@@ -430,12 +406,6 @@ impl From<PktMonFilter> for CPktMonFilter {
             },
 
             port_dst: {
-                // if letSome(port_dst) = filter.port_dst {
-                //     flags.set_port_dst(true);
-                //     port_dst
-                // } else {
-                //     0
-                // }
                 match filter.port.second() {
                     Some(&port) => {
                         flags.set_port_dst(true);

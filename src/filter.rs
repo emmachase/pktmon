@@ -2,48 +2,54 @@ use std::{num::ParseIntError, str::FromStr};
 
 use cidr::AnyIpCidr;
 
+///
+/// NOTE: When two MACs, IPs, or ports are specified, the filter
+///  matches packets that contain both. It will not distinguish between source
+///  or destination for this purpose.
+///
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PktMonFilter {
+    /// Name of the filter.
+    /// 
+    /// Max length is 63 characters.
+    /// Driver will truncate to 63 characters if longer.
     pub name: String,
 
-    pub mac_src: Option<MacAddr>,
-    pub mac_dst: Option<MacAddr>,
+    /// Match by source MAC address.
+    /// 
+    /// See [`OptionPair`] for more information.
+    pub mac: OptionPair<MacAddr>,
 
+    /// Match by source IP address.
+    /// 
+    /// See [`OptionPair`] for more information.
     pub ip: OptionPair<AnyIpCidr>,
+
+    /// Match by source port.
+    /// 
+    /// See [`OptionPair`] for more information.
     pub port: OptionPair<u16>,
 
-    /**
-     * Match by the 6-bit Differentiated Services Code Point (DSCP) field.
-     */
+    /// Match by the 6-bit Differentiated Services Code Point (DSCP) field.
     pub dscp: Option<u8>,
 
-    /**
-     * Match by VLAN Id (VID) in the 802.1Q header.
-     */
+    /// Match by VLAN Id (VID) in the 802.1Q header.
     pub vlan: Option<u16>,
 
-    /**
-     * Match by data link (layer 2) protocol. Can be IPv4, IPv6, ARP, or a protocol number.
-     */
+    /// Match by data link (layer 2) protocol. Can be IPv4, IPv6, ARP, or a protocol number.
     pub data_link_protocol: Option<DataLinkProtocol>,
     
-    /**
-     * Match by transport (layer 4) protocol. Can be TCP, UDP, ICMP, ICMPv6, or a protocol number.
-     *  To further filter TCP packets, an optional list of TCP flags to match can
-     *  be provided. Supported flags are FIN, SYN, RST, PSH, ACK, URG, ECE, and CWR.
-     */
+    /// Match by transport (layer 4) protocol. Can be TCP, UDP, ICMP, ICMPv6, or a protocol number.
+    ///  To further filter TCP packets, an optional list of TCP flags to match can
+    ///  be provided. Supported flags are FIN, SYN, RST, PSH, ACK, URG, ECE, and CWR.
     pub transport_protocol: Option<TransportProtocol>,
 
-    /**
-     * Apply above filtering parameters to both inner and outer encapsulation headers.
-     *  Supported encapsulation methods are VXLAN, GRE, NVGRE, and IP-in-IP.
-     *  Custom VXLAN port is optional, and defaults to 4789.
-     */
+    /// Apply above filtering parameters to both inner and outer encapsulation headers.
+    ///  Supported encapsulation methods are VXLAN, GRE, NVGRE, and IP-in-IP.
+    ///  Custom VXLAN port is optional, and defaults to 4789.
     pub encapsulation: Encapsulation,
 
-    /**
-     * If true, match RCP heartbeat messages over UDP port 3343.
-     */
+    /// If true, match RCP heartbeat messages over UDP port 3343.
     pub heartbeat: bool,
 }
 
@@ -51,8 +57,7 @@ impl Default for PktMonFilter {
     fn default() -> Self {
         Self {
             name: "Unamed Filter".to_owned(),
-            mac_src: None,
-            mac_dst: None,
+            mac: OptionPair::None,
             ip: OptionPair::None,
             port: OptionPair::None,
             dscp: None,
@@ -65,6 +70,10 @@ impl Default for PktMonFilter {
     }
 }
 
+///
+/// Represents None, Some, or Both values.
+/// If Both are present, the filter will only match packets that contain both values, NOT either.
+/// 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptionPair<T> {
     None,
