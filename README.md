@@ -1,7 +1,7 @@
 # PktMon
 
 PktMon is a library for capturing network packets on Windows using the
-PktMon driver, which is included by default with Windows 10 and later.
+PktMon service, which is included by default with Windows 10 and later.
 
 See [here](https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon)
 for more information about the PktMon service.
