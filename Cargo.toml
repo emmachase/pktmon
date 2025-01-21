@@ -6,7 +6,7 @@ license = "MIT"
 authors = ["emmachase <me@its-em.ma>"]
 repository = "https://github.com/emmachase/pktmon"
 readme = "README.md"
-keywords = ["pktmon", "network", "capture", "windows", "packet", "sniffer"]
+keywords = ["pktmon", "network", "capture", "windows", "sniffer"]
 categories = ["network", "capture", "windows"]
 
 edition = "2021"
