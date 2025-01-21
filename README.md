@@ -1,10 +1,14 @@
 # PktMon
+![Crates.io Version](https://img.shields.io/crates/v/pktmon)
 
 PktMon is a library for capturing network packets on Windows using the
 PktMon service, which is included by default with Windows 10 and later.
 
 See [here](https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon)
 for more information about the PktMon service.
+
+See the [Documentation](https://docs.rs/pktmon/latest/x86_64-pc-windows-msvc/pktmon/)
+for more information about the library.
 
 ## Features
 

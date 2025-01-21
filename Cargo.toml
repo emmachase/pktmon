@@ -1,10 +1,11 @@
 [package]
 name = "pktmon"
-version = "0.1.0"
+version = "0.1.1"
 description = "A library for capturing network packets on Windows using the PktMon service"
 license = "MIT"
 authors = ["emmachase <me@its-em.ma>"]
 repository = "https://github.com/emmachase/pktmon"
+documentation = "https://docs.rs/pktmon/latest/x86_64-pc-windows-msvc/pktmon/"
 readme = "README.md"
 keywords = ["pktmon", "network", "capture", "windows", "sniffer"]
 categories = ["api-bindings", "network-programming", "os", "os::windows-apis"]
