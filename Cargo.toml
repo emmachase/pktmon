@@ -7,7 +7,7 @@ authors = ["emmachase <me@its-em.ma>"]
 repository = "https://github.com/emmachase/pktmon"
 readme = "README.md"
 keywords = ["pktmon", "network", "capture", "windows", "sniffer"]
-categories = ["network", "capture", "windows"]
+categories = ["api-bindings", "network-programming", "os", "os::windows-apis"]
 
 edition = "2021"
 
