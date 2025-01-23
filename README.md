@@ -26,13 +26,6 @@ for more information about the library.
 cargo add pktmon
 ```
 
-Or add it to your `Cargo.toml`:
-
-```toml
-[dependencies]
-pktmon = "0.1.0"
-```
-
 ## Usage
 
 ```rust

@@ -189,6 +189,7 @@ impl Drop for EtwSession {
     }
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Packet {
     pub payload: Vec<u8>,
 }

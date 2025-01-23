@@ -22,7 +22,7 @@
 //! 
 //! See [Capture] for more information.
 //! 
-//! ```rust
+//! ```no_run
 //! use pktmon::{Capture, filter::{PktMonFilter, TransportProtocol}};
 //! 
 //! fn main() {
@@ -53,7 +53,7 @@
 //! }
 //! ```
 
-use std::{io, sync::mpsc::RecvError, fmt::Debug};
+use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, fmt::Debug, time::Duration};
 use driver::Driver;
 use etw::{EtwConsumer, EtwSession, Packet};
 use filter::PktMonFilter;
@@ -73,7 +73,7 @@ pub mod filter;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```no_run
 /// use pktmon::{Capture, filter::{PktMonFilter, TransportProtocol}};
 ///
 /// // Create a new capture instance
@@ -226,11 +226,22 @@ impl Capture {
     /// Get the next packet from the capture.
     /// 
     /// Returns an error if the capture isn't running.
-    pub fn next_packet(&mut self) -> Result<Packet, RecvError> {
-        if let Some(ref mut consumer) = self.consumer {
+    pub fn next_packet(&self) -> Result<Packet, RecvError> {
+        if let Some(ref consumer) = self.consumer {
             consumer.receiver.recv()
         } else {
             Err(RecvError)
+        }
+    }
+
+    /// Get the next packet from the capture with a timeout.
+    /// 
+    /// Returns an error if the capture isn't running or if the timeout is reached.
+    pub fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError> {
+        if let Some(ref consumer) = self.consumer {
+            consumer.receiver.recv_timeout(timeout)
+        } else {
+            Err(RecvTimeoutError::Disconnected)
         }
     }
 }
