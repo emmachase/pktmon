@@ -1,4 +1,4 @@
-use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, thread};
+use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, thread, time::Duration};
 
 use pktmon::{filter::{PktMonFilter, TransportProtocol}, Capture};
 
@@ -10,17 +10,8 @@ fn main() {
     let mut sniffer = Capture::new().unwrap();
 
     sniffer.add_filter(PktMonFilter {
-        name: "RQA - 1".to_string(),
+        name: "UDP Traffic".to_string(),
         transport_protocol: Some(TransportProtocol::UDP),
-        port: 23301.into(),
-
-        ..PktMonFilter::default()
-    }).unwrap();
-
-    sniffer.add_filter(PktMonFilter {
-        name: "RQA - 2".to_string(),
-        transport_protocol: Some(TransportProtocol::UDP),
-        port: 23302.into(),
 
         ..PktMonFilter::default()
     }).unwrap();
@@ -35,9 +26,10 @@ fn main() {
         let sniffer = sniffer.clone();
         thread::spawn(move || {
             loop {
-                let mut sniffer = sniffer.lock().unwrap();
-                let packet = sniffer.next_packet().unwrap();
-                println!("{:?}", packet.payload);
+                let sniffer = sniffer.lock().unwrap();
+                if let Ok(packet) = sniffer.next_packet_timeout(Duration::from_secs(1)) {
+                    println!("{:?}", packet.payload);
+                }
 
                 if !running.load(Ordering::Relaxed) {
                     break;

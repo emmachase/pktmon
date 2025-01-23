@@ -54,11 +54,22 @@ impl Driver {
             trace!("Opened SC Manager");
 
             // Open PktMon service
-            let h_service: SvcHandle = OpenServiceA(
+            // let h_service: SvcHandle = OpenServiceA(
+            //     &h_manager,
+            //     s!("PktMon"),
+            //     SERVICE_START | SERVICE_STOP,
+            // )?.into();
+            let h_service: SvcHandle = match OpenServiceA(
                 &h_manager,
                 s!("PktMon"),
                 SERVICE_START | SERVICE_STOP,
-            )?.into();
+            ) {
+                Ok(handle) => handle.into(),
+                Err(e) => {
+                    debug!("Failed to open PktMon service: {:?}", e);
+                    return Err(e);
+                }
+            };
             trace!("Opened PktMon service");
 
             // Start the service
@@ -79,6 +90,12 @@ impl Driver {
 
             trace!("Opened PktMon device");
             let driver = Driver { handle: h_driver };
+
+            // If the driver is already running, stop it
+            if driver.is_running()? {
+                debug!("Driver is already running, stopping it...");
+                driver.stop_capture()?;
+            }
 
             // Clear all filters before handing off the driver to ensure we have a clean state
             driver.remove_all_filters()?;
@@ -110,6 +127,31 @@ impl Driver {
             debug!("Unloaded PktMon service");
 
             Ok(())
+        }
+    }
+
+    pub fn is_running(&self) -> win::Result<bool> {
+        unsafe {
+            const IOCTL_GET_STATE: u32 = 0x220424;
+            let mut bytes_returned: u32 = 0;
+            let mut out_buffer: [u8; 0x14] = [0; 0x14];
+
+            let result = DeviceIoControl(
+                self.handle,
+                IOCTL_GET_STATE,
+                None,
+                0,
+                Some(out_buffer.as_mut_ptr() as *mut _),
+                out_buffer.len() as u32,
+                Some(&mut bytes_returned),
+                None,
+            );
+
+            if result == TRUE {
+                Ok(out_buffer[4] != 0)
+            } else {
+                Err(GetLastError().into())
+            }
         }
     }
 
