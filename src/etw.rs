@@ -304,6 +304,22 @@ impl EtwConsumer {
 
             // Frame Payload
             if record.EventHeader.EventDescriptor.Id == 160 {
+                let packet_type = match get_event_property_value_u32(
+                    event_record, 
+                    w!("PacketType")
+                ) {
+                    Ok(size) => size,
+                    Err(e) => {
+                        error!("Failed to get PacketType {:#?}", e);
+                        return;
+                    }
+                };
+                
+                if packet_type != 1 {
+                    debug!("Received non-ethernet packet of type: {:?}", packet_type);
+                    return;
+                }
+
                 let original_payload_size = match get_event_property_value_u32(
                     event_record, 
                     w!("LoggedPayloadSize")
