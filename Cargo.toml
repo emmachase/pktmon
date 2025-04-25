@@ -1,6 +1,6 @@
 [package]
 name = "pktmon"
-version = "0.2.0"
+version = "0.3.0"
 description = "A library for capturing network packets on Windows using the PktMon service"
 license = "MIT"
 authors = ["emmachase <me@its-em.ma>"]
@@ -24,6 +24,7 @@ windows = { version = "0.48", features = [
     "Win32_System_IO",
     "Win32_System_Time",
     "Win32_System_Diagnostics_Etw",
+    "Win32_System_LibraryLoader",
 ]}
 
 [dev-dependencies]

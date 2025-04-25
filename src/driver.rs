@@ -1,95 +1,64 @@
+use std::ffi::c_void;
+use std::mem::transmute;
+
 use log::{debug, trace};
 use windows::core as win;
-use windows::core::{IntoParam, Param, s};
-use windows::Win32::Foundation::{CloseHandle, GetLastError, GENERIC_READ, GENERIC_WRITE, HANDLE, TRUE};
-use windows::Win32::Security::SC_HANDLE;
-use windows::Win32::Storage::FileSystem::{CreateFileA, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING};
-use windows::Win32::System::Services::{
-    CloseServiceHandle, ControlService, OpenSCManagerA, OpenServiceA, StartServiceA,
-    SC_MANAGER_CONNECT, SERVICE_CONTROL_STOP, SERVICE_START, SERVICE_STATUS, SERVICE_STOP,
-};
-use windows::Win32::System::IO::DeviceIoControl;
+use windows::core::s;
+use windows::Win32::Foundation::{NO_ERROR, WIN32_ERROR};
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 
-use crate::c_filter::CPktMonFilter;
+use crate::c_filter::CPktMonUserFilter;
 use crate::filter::PktMonFilter;
 
-#[repr(transparent)]
-#[derive(Debug, Clone)]
-struct SvcHandle(SC_HANDLE);
-impl Drop for SvcHandle {
-    fn drop(&mut self) {
-        unsafe {
-            CloseServiceHandle(self.0);
-        }
-    }
-}
-
-impl From<SC_HANDLE> for SvcHandle {
-    fn from(handle: SC_HANDLE) -> Self {
-        Self(handle)
-    }
-}
-
-impl IntoParam<SC_HANDLE> for &SvcHandle {
-    fn into_param(self) -> Param<SC_HANDLE> {
-        Param::Borrowed(self.0)
-    }
-}
-
 pub struct Driver {
-    handle: HANDLE,
+    api: PktMonApi,
+}
+
+type CPktMonStatus = [u8; 0x103C];
+
+#[repr(C)]
+#[derive(Debug, Clone)]
+struct CPktMonStart {
+    capture_type: u32, // 1 = All Packets
+    _unknown1: u32,
+    mode: u32, // 1 = All, 2 = NICs, 3 = Component List
+    component_count: u16, // Should be zero if mode is not 3
+    _unknown2: u16,
+    component_list_ptr: *mut c_void,
+    _unknown3: u16,
+}
+
+impl CPktMonStart {
+    fn new() -> Self {
+        Self { capture_type: 1, _unknown1: 0, mode: 1, component_count: 0, _unknown2: 0, component_list_ptr: std::ptr::null_mut(), _unknown3: 0 }
+    }
+}
+
+struct PktMonApi {
+    add_filter: extern "C" fn(*const CPktMonUserFilter) -> WIN32_ERROR,
+    remove_all_filters: extern "C" fn() -> WIN32_ERROR,
+    start_capture: extern "C" fn(*const CPktMonStart, *mut c_void) -> WIN32_ERROR,
+    stop_capture: extern "C" fn(*mut CPktMonStatus) -> WIN32_ERROR,
+    get_status: extern "C" fn(*mut CPktMonStatus) -> WIN32_ERROR,
+    unload: extern "C" fn() -> WIN32_ERROR,
 }
 
 impl Driver {
     pub fn new() -> win::Result<Self> {
         unsafe {
-            trace!("Starting PktMon service...");
+            let module = LoadLibraryA(s!("PktMonApi.dll"))?;
 
-            // Open SC Manager
-            let h_manager: SvcHandle = OpenSCManagerA(
-                None,
-                s!("ServicesActive"),
-                SC_MANAGER_CONNECT,
-            )?.into();
-            trace!("Opened SC Manager");
-
-            // Open PktMon service
-            // let h_service: SvcHandle = OpenServiceA(
-            //     &h_manager,
-            //     s!("PktMon"),
-            //     SERVICE_START | SERVICE_STOP,
-            // )?.into();
-            let h_service: SvcHandle = match OpenServiceA(
-                &h_manager,
-                s!("PktMon"),
-                SERVICE_START | SERVICE_STOP,
-            ) {
-                Ok(handle) => handle.into(),
-                Err(e) => {
-                    debug!("Failed to open PktMon service: {:?}", e);
-                    return Err(e);
-                }
+            let api = PktMonApi {
+                add_filter: transmute(GetProcAddress(module, s!("PktmonAddFilter")).unwrap()),
+                remove_all_filters: transmute(GetProcAddress(module, s!("PktmonRemoveAllFilters")).unwrap()),
+                start_capture: transmute(GetProcAddress(module, s!("PktmonStart")).unwrap()),
+                stop_capture: transmute(GetProcAddress(module, s!("PktmonStop")).unwrap()),
+                get_status: transmute(GetProcAddress(module, s!("PktmonGetStatus")).unwrap()),
+                unload: transmute(GetProcAddress(module, s!("PktmonUnload")).unwrap()),
             };
-            trace!("Opened PktMon service");
-
-            // Start the service
-            StartServiceA(&h_service, None);
-            debug!("Started PktMon service");
-
-            // Open device handle
-            let device_path = s!("\\\\.\\PktMonDev");
-            let h_driver = CreateFileA(
-                device_path,
-                (GENERIC_READ | GENERIC_WRITE).0,
-                FILE_SHARE_NONE,
-                None,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                None,
-            )?;
 
             trace!("Opened PktMon device");
-            let driver = Driver { handle: h_driver };
+            let driver = Driver { api };
 
             // If the driver is already running, stop it
             if driver.is_running()? {
@@ -104,178 +73,71 @@ impl Driver {
         }
     }
 
-    pub fn unload() -> win::Result<()> {
-        unsafe {
-            debug!("Unloading PktMon service...");
+    pub fn unload(&self) -> win::Result<()> {
+        debug!("Unloading PktMon service...");
 
-            let h_manager: SvcHandle = OpenSCManagerA(
-                None,
-                s!("ServicesActive"),
-                SC_MANAGER_CONNECT,
-            )?.into();
-
-            let h_service: SvcHandle = OpenServiceA(
-                &h_manager,
-                s!("PktMon"),
-                SERVICE_START | SERVICE_STOP,
-            )?.into();
-
-
-            let mut status = SERVICE_STATUS::default();
-            ControlService(&h_service, SERVICE_CONTROL_STOP, &mut status);
-
-            debug!("Unloaded PktMon service");
-
-            Ok(())
+        let err = (self.api.unload)();
+        if err != NO_ERROR {
+            return Err(err.into());
         }
+
+        debug!("Unloaded PktMon service");
+
+        Ok(())
     }
 
     pub fn is_running(&self) -> win::Result<bool> {
-        unsafe {
-            const IOCTL_GET_STATE: u32 = 0x220424;
-            let mut bytes_returned: u32 = 0;
-            let mut out_buffer: [u8; 0x14] = [0; 0x14];
+        let mut status = [0; 0x103C];
 
-            let result = DeviceIoControl(
-                self.handle,
-                IOCTL_GET_STATE,
-                None,
-                0,
-                Some(out_buffer.as_mut_ptr() as *mut _),
-                out_buffer.len() as u32,
-                Some(&mut bytes_returned),
-                None,
-            );
-
-            if result == TRUE {
-                Ok(out_buffer[4] != 0)
-            } else {
-                Err(GetLastError().into())
-            }
+        let err = (self.api.get_status)(&mut status);
+        if err != NO_ERROR {
+            return Err(err.into());
         }
+
+        Ok(status[0] != 0)
     }
 
     pub fn start_capture(&self) -> win::Result<()> {
-        unsafe {
-            debug!("Starting capture...");
+        debug!("Starting capture...");
 
-            const IOCTL_START: u32 = 0x220404;
-            let mut bytes_returned: u32 = 0;
-
-            let mut buffer: [u8; 0x14] = [
-                0x14, 0x0, 0x0, 0x0,  // Size
-                0x01, 0x0, 0x0, 0x0,  // Components (1 = All)
-                0x14, 0x0, 0x0, 0x0,  // Unknown
-                0x01, 0x0, 0x0, 0x0,  // Unknown
-                0x01, 0x0, 0x00, 0x00 // Unknown
-            ];
-
-            let result = DeviceIoControl(
-                self.handle,
-                IOCTL_START,
-                Some(buffer.as_mut_ptr() as *mut _),
-                buffer.len() as u32,
-                None,
-                0,
-                Some(&mut bytes_returned),
-                None,
-            );
-
-            if result == TRUE {
-                Ok(())
-            } else {
-                Err(GetLastError().into())
-            }
+        let err = (self.api.start_capture)(&mut CPktMonStart::new(), std::ptr::null_mut());
+        if err != NO_ERROR {
+            return Err(err.into());
         }
+
+        Ok(())
     }
 
     pub fn stop_capture(&self) -> win::Result<()> {
-        unsafe {
-            debug!("Stopping capture...");
+        debug!("Stopping capture...");
 
-            const IOCTL_STOP: u32 = 0x220408;
-            let mut bytes_returned: u32 = 0;
-            let mut out_buffer: [u8; 0x14] = [0; 0x14];
-
-            let result = DeviceIoControl(
-                self.handle,
-                IOCTL_STOP,
-                None,
-                0,
-                Some(out_buffer.as_mut_ptr() as *mut _),
-                out_buffer.len() as u32,
-                Some(&mut bytes_returned),
-                None,
-            );
-
-            if result == TRUE {
-                Ok(())
-            } else {
-                Err(GetLastError().into())
-            }
+        let err = (self.api.stop_capture)(&mut [0; 0x103C]);
+        if err != NO_ERROR {
+            return Err(err.into());
         }
+
+        Ok(())
     }
 
     pub fn remove_all_filters(&self) -> win::Result<()> {
-        unsafe {
-            debug!("Removing all filters...");
+        debug!("Removing all filters...");
 
-            const IOCTL_REMOVE_ALL_FILTERS: u32 = 0x220414;
-            let mut bytes_returned: u32 = 0;
-
-            let result = DeviceIoControl(
-                self.handle,
-                IOCTL_REMOVE_ALL_FILTERS,
-                None,
-                0,
-                None,
-                0,
-                Some(&mut bytes_returned),
-                None,
-            );
-
-            if result == TRUE {
-                Ok(())
-            } else {
-                Err(GetLastError().into())
-            }
+        let err = (self.api.remove_all_filters)();
+        if err != NO_ERROR {
+            return Err(err.into());
         }
+
+        Ok(())
     }
 
     pub fn add_filter(&self, filter: PktMonFilter) -> win::Result<()> {
-        unsafe {
-            debug!("Adding filter {:?}", filter);
+        debug!("Adding filter {:?}", filter);
 
-            const IOCTL_ADD_FILTER: u32 = 0x220410;
-            let mut bytes_returned: u32 = 0;
-
-            let filter = CPktMonFilter::from(filter);
-            let filter_bytes = filter.as_bytes();
-
-            let result = DeviceIoControl(
-                self.handle,
-                IOCTL_ADD_FILTER,
-                Some(filter_bytes.as_ptr() as *mut _),
-                filter_bytes.len() as u32,
-                None,
-                0,
-                Some(&mut bytes_returned),
-                None,
-            );
-
-            if result == TRUE {
-                Ok(())
-            } else {
-                Err(GetLastError().into())
-            }
+        let err = (self.api.add_filter)(&filter.into());
+        if err != NO_ERROR {
+            return Err(err.into());
         }
-    }
-}
 
-impl Drop for Driver {
-    fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.handle);
-        }
+        Ok(())
     }
 }

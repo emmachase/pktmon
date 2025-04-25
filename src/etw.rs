@@ -1,4 +1,4 @@
-use std::{ffi::c_void, sync::{mpsc::{self, Receiver, Sender}, Arc, RwLock}, thread::{self, JoinHandle}};
+use std::{ffi::c_void, path::Path, sync::{mpsc::{self, Receiver, Sender}, Arc, RwLock}, thread::{self, JoinHandle}, time::Duration};
 
 use windows::{core::{self as win, GUID, PCWSTR, PSTR}, w, Win32::{Foundation::{GetLastError, ERROR_SUCCESS, ERROR_WMI_INSTANCE_NOT_FOUND, INVALID_HANDLE_VALUE, NO_ERROR}, System::Diagnostics::Etw::{CloseTrace, ControlTraceA, EnableTraceEx2, OpenTraceA, ProcessTrace, StartTraceA, TdhGetProperty, CONTROLTRACE_HANDLE, EVENT_CONTROL_CODE_DISABLE_PROVIDER, EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_RECORD, EVENT_TRACE_CONTROL_FLUSH, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_INDEPENDENT_SESSION_MODE, EVENT_TRACE_LOGFILEA, EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE, PROCESSTRACE_HANDLE, PROCESS_TRACE_MODE_EVENT_RECORD, PROCESS_TRACE_MODE_REAL_TIME, PROPERTY_DATA_DESCRIPTOR, TRACE_LEVEL_INFORMATION, WNODE_FLAG_TRACED_GUID}}};
 use crate::util::s_with_len;
@@ -59,7 +59,6 @@ impl Default for SessionProperties {
 pub struct EtwSession {
     session_properties: SessionProperties,
     control_handle: CONTROLTRACE_HANDLE,
-
     trace_on: bool,
 }
 
@@ -378,6 +377,236 @@ impl Drop for EtwConsumer {
     fn drop(&mut self) {
         if let Err(e) = self.stop() {
             error!("Failed to stop EtwConsumer: {:#?}", e);
+        }
+    }
+}
+
+/// A consumer for ETL (Event Trace Log) files that extracts packet data.
+///
+/// The `EtlConsumer` struct provides a way to process previously captured ETL files
+/// and extract network packets from them. This is useful for analyzing packet captures
+/// offline or for processing captures from other systems.
+/// 
+/// # Examples
+/// 
+/// ```no_run
+/// use pktmon::etw::EtlConsumer;
+/// use std::path::Path;
+/// 
+/// // Create a new ETL consumer
+/// let mut etl_consumer = EtlConsumer::new("C:\\path\\to\\capture.etl").unwrap();
+/// 
+/// // Process the file (blocks until complete)
+/// etl_consumer.process().unwrap();
+/// 
+/// // Now access the collected packets
+/// for packet in etl_consumer.packets() {
+///     println!("Packet payload size: {}", packet.payload.len());
+/// }
+/// ```
+pub struct EtlConsumer {
+    etl_path: String,
+    process_handle: PROCESSTRACE_HANDLE,
+    context: Arc<Box<RwLock<ConsumerContext>>>,
+    thread: Option<JoinHandle<()>>,
+    pub receiver: Receiver<Packet>,
+    stopped: bool,
+}
+
+impl EtlConsumer {
+    /// Create a new ETL consumer for the specified ETL file.
+    ///
+    /// This function prepares to read from the ETL file but doesn't start processing it yet.
+    /// Call [`process()`](EtlConsumer::process) to start processing the file.
+    ///
+    /// # Arguments
+    ///
+    /// * `etl_path` - Path to the ETL file to process
+    ///
+    /// # Returns
+    ///
+    /// A result containing the `EtlConsumer` or a Windows error.
+    pub fn new<P: AsRef<Path>>(etl_path: P) -> win::Result<Self> {
+        let etl_path_str = etl_path.as_ref().to_string_lossy().to_string();
+        debug!("Creating ETL consumer for file: {}", etl_path_str);
+        
+        let (sender, receiver) = mpsc::channel();
+        
+        let mut boxed = Box::new(RwLock::new(ConsumerContext {
+            running: true,
+            sender,
+        }));
+        let context_ptr = &mut*boxed as *mut RwLock<ConsumerContext>;
+        
+        let mut trace = EVENT_TRACE_LOGFILEA::default();
+        
+        // Convert path to wide string
+        let mut wide_path = etl_path_str.as_bytes().to_vec();//.encode_utf16().collect::<Vec<_>>();
+        wide_path.push(0); // Null terminate
+        
+        // Set the log file name
+        let wide_path_ptr = wide_path.as_ptr();
+        trace.LogFileName.0 = wide_path_ptr as *mut u8;
+        
+        // Configure trace to process the file
+        trace.Anonymous1.ProcessTraceMode = PROCESS_TRACE_MODE_EVENT_RECORD;
+        
+        // Set callbacks
+        trace.Anonymous2.EventRecordCallback = Some(EtwConsumer::event_record_callback);
+        
+        let mut this = Self {
+            etl_path: etl_path_str,
+            process_handle: PROCESSTRACE_HANDLE::default(),
+            context: Arc::new(boxed),
+            thread: None,
+            receiver,
+            stopped: false,
+        };
+        
+        unsafe {
+            trace.Context = context_ptr as *mut c_void;
+            
+            let handle = OpenTraceA(&mut trace);
+            if handle.0 == INVALID_HANDLE_VALUE.0 as u64 {
+                return Err(GetLastError().into());
+            }
+            
+            this.process_handle = handle;
+        }
+        
+        debug!("ETL consumer created successfully");
+        
+        Ok(this)
+    }
+    
+    /// Process the ETL file.
+    ///
+    /// This function blocks until the entire file has been processed or an error occurs.
+    /// Packets are sent to the channel as they are processed and can be retrieved using
+    /// the [`receiver`](EtlConsumer::receiver) field or the [`packets()`](EtlConsumer::packets) method.
+    ///
+    /// # Returns
+    ///
+    /// A result indicating success or a Windows error.
+    pub fn process(&mut self) -> win::Result<()> {
+        if self.thread.is_some() {
+            debug!("ETL file is already being processed");
+            return Ok(());
+        }
+        
+        debug!("Starting to process ETL file: {}", self.etl_path);
+        
+        let process_handle = self.process_handle;
+        
+        let context = self.context.clone();
+        self.thread = Some(thread::spawn(move || {
+            unsafe {
+                ProcessTrace(
+                    &[process_handle],
+                    None,
+                    None
+                );
+                debug!("ETL processing complete, closing trace");
+                CloseTrace(process_handle);
+                debug!("ETL trace closed");
+                context.write().unwrap().running = false;
+            }
+        }));
+        
+        debug!("ETL processing started in background thread");
+        
+        Ok(())
+    }
+    
+    /// Process the ETL file synchronously.
+    ///
+    /// This function blocks until the entire file has been processed or an error occurs.
+    /// All packets are collected and returned in a vector.
+    ///
+    /// # Returns
+    ///
+    /// A result containing a vector of packets or a Windows error.
+    pub fn process_sync(&mut self) -> win::Result<Vec<Packet>> {
+        self.process()?;
+        
+        let mut packets = Vec::new();
+        
+        loop {
+            while let Ok(packet) = self.receiver.recv_timeout(Duration::from_millis(50)) {
+                packets.push(packet);
+            }
+            
+            if !self.context.read().unwrap().running {
+                break;
+            }
+        }
+        
+        // Join the thread to ensure processing is complete
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
+        
+        self.stopped = true;
+        
+        debug!("ETL processing complete, collected {} packets", packets.len());
+        
+        Ok(packets)
+    }
+    
+    /// Get an iterator over all the packets in the ETL file.
+    ///
+    /// This method processes the ETL file synchronously and returns an iterator
+    /// over all the packets. This is a convenience method that calls [`process_sync()`](EtlConsumer::process_sync)
+    /// internally.
+    ///
+    /// # Returns
+    ///
+    /// A result containing an iterator over packets or a Windows error.
+    pub fn packets(&mut self) -> win::Result<impl Iterator<Item = Packet>> {
+        Ok(self.process_sync()?.into_iter())
+    }
+    
+    /// Stop processing the ETL file.
+    ///
+    /// This function stops any ongoing processing and releases resources.
+    ///
+    /// # Returns
+    ///
+    /// A result indicating success or a Windows error.
+    pub fn stop(&mut self) -> win::Result<()> {
+        if self.stopped {
+            return Ok(());
+        }
+        
+        debug!("Stopping ETL processing");
+        
+        self.stopped = true;
+        
+        {
+            let mut context = self.context.write().unwrap();
+            context.running = false;
+        }
+        
+        // Force the trace to close
+        unsafe {
+            CloseTrace(self.process_handle);
+        }
+        
+        // Join the thread
+        if let Some(thread) = self.thread.take() {
+            thread.join().unwrap();
+        }
+        
+        debug!("ETL processing stopped");
+        
+        Ok(())
+    }
+}
+
+impl Drop for EtlConsumer {
+    fn drop(&mut self) {
+        if let Err(e) = self.stop() {
+            error!("Failed to stop ETL consumer: {:#?}", e);
         }
     }
 }

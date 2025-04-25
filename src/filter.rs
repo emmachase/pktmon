@@ -188,11 +188,11 @@ pub enum TransportProtocol {
     ICMP,
     ICMPV6,
 
-    Custom(u16),
+    Custom(u8),
 }
 
-impl From<u16> for TransportProtocol {
-    fn from(value: u16) -> Self {
+impl From<u8> for TransportProtocol {
+    fn from(value: u8) -> Self {
         match value {
             6 => TransportProtocol::TCP,
             17 => TransportProtocol::UDP,
@@ -203,7 +203,7 @@ impl From<u16> for TransportProtocol {
     }
 }
 
-impl From<&TransportProtocol> for u16 {
+impl From<&TransportProtocol> for u8 {
     fn from(value: &TransportProtocol) -> Self {
         match value {
             TransportProtocol::TCP => 6,

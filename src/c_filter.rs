@@ -11,64 +11,92 @@ use crate::filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol};
  */
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CPktMonFilter {
-    // Offset 0x00-0x7F: Name/Description field (128 bytes)
-    pub name: [u8; 128],          // 128 bytes (doubled from 64 for wide chars) UTF-16LE
+pub struct CPktMonUserFilter {
+    /// Structure size (195 or 200), we always use 200
+    pub size: u16,
 
-    // Offset 0x80: Control flags (32-bit)
-    pub flags: Flags,             // Using a separate struct for bitfields
+    /// Name (128 bytes as wchar_t is 2 bytes)
+    /// Offset 2: Takes us to offset 130
+    pub name: [u8; 128],
 
-    // Offset 0x84: MAC addresses (12 bytes)
-    pub mac_src: CMacAddr,         // Source MAC
-    pub mac_dst: CMacAddr,         // Destination MAC
+    /// Source MAC (6 bytes)
+    /// Offset 130
+    pub mac_src: CMacAddr,
 
-    // Offset 0x90: VLAN ID
+    /// Destination MAC (6 bytes)
+    /// Offset 136
+    pub mac_dst: CMacAddr,
+
+    /// VLAN ID
+    /// Offset 142
     pub vlan: u16,
 
-    // Offset 0x92: EtherType/Protocol
+    /// EtherType/Protocol
+    /// Offset 144
     pub protocol: u16,
 
-    // Offset 0x94: DSCP
-    pub dscp: u16, // Max value is 0x3F
+    /// Transport protocol
+    /// Offset 146
+    pub transport_proto: u8,
 
-    // Offset 0x96: Transport protocol
-    pub transport_proto: u16,
+    /// IP version flag
+    /// Offset 147
+    pub ip_v6: u8,
 
-    // Offset 0x98: IP source address
+    /// Padding to align to offset 152
+    _padding1: [u8; 4],
+
+    /// IP source address (16 bytes)
+    /// Offset 152
     pub ip_src: CIPAddr,
 
-    // Offset 0xA8: IP destination address
+    /// IP destination address (16 bytes)
+    /// Offset 168
     pub ip_dst: CIPAddr,
 
-    // Offset 0xB8: IP source prefix
+    /// IP source prefix
+    /// Offset 184
     pub ip_src_prefix: u8,
 
-    // Offset 0xB9: IP destination prefix
+    /// IP destination prefix
+    /// Offset 185
     pub ip_dst_prefix: u8,
 
-    // Offset 0xBA: Ports
+    /// Source port
+    /// Offset 186
     pub port_src: u16,
+
+    /// Destination port
+    /// Offset 188
     pub port_dst: u16,
 
-    // Offset 0xBE: TCP flags
+    /// TCP flags
+    /// Offset 190
     pub tcp_flags: u8,
 
-    _padding: u8,
+    /// Encapsulation
+    /// Offset 191
+    pub encapsulation: u8,
 
-    // Offset 0xC0: Encapsulation
-    pub encapsulation: u32,
-
-    // Offset 0xC4: VXLAN port
+    /// VXLAN port
+    /// Offset 192
     pub vxlan_port: u16,
 
-    // Offset 0xC6 - 0xD8: Reserved for future use
-    _reserved: [u8; 18],
-}
+    /// Heartbeat
+    /// Offset 194
+    pub heartbeat: u8,
 
-impl CPktMonFilter {
-    pub fn as_bytes(&self) -> [u8; 108*2] {
-        unsafe { std::mem::transmute::<CPktMonFilter, [u8; 108*2]>(*self) }
-    }
+    /// Padding
+    /// Offset 195
+    _padding2: u8,
+
+    /// DSCP Value (only in 200 byte version)
+    /// Offset 196
+    pub dscp: u16,
+
+    /// Padding
+    /// Offset 198
+    _padding3: [u8; 2],
 }
 
 #[repr(C)]
@@ -114,136 +142,6 @@ pub struct CIPv6Addr {
     pub addr: [u16; 8]
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub struct Flags {
-    pub raw: u32,
-}
-
-impl Debug for Flags {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Flags {{ mac_src: {}, mac_dst: {}, vlan_id: {}, data_link_protocol: {}, dscp: {}, transport_protocol: {}, ip_src: {}, ip_dst: {}, ip_v6: {}, ip_src_prefix: {}, ip_dst_prefix: {}, port_src: {}, port_dst: {}, tcp_flags: {}, encapsulation: {}, vxlan_port: {}, heartbeat: {} }}", 
-            self.mac_src(),
-            self.mac_dst(),
-            self.vlan_id(),
-            self.data_link_protocol(),
-            self.dscp(),
-            self.transport_protocol(),
-            self.ip_src(),
-            self.ip_dst(),
-            self.ip_v6(),
-            self.ip_src_prefix(),
-            self.ip_dst_prefix(),
-            self.port_src(),
-            self.port_dst(),
-            self.tcp_flags(),
-            self.encapsulation(),
-            self.vxlan_port(),
-            self.heartbeat()
-        )
-    }
-}
-
-fn test_bit(value: u32, bit: u32) -> bool {
-    (value & (1 << bit)) != 0
-}
-
-fn set_bit(value: u32, bit: u32, set: bool) -> u32 {
-    if set {
-        value | (1 << bit)
-    } else {
-        value & !(1 << bit)
-    }
-}
-
-impl Flags {
-    pub fn mac_src(&self)            -> bool { test_bit(self.raw, 0) }
-    pub fn mac_dst(&self)            -> bool { test_bit(self.raw, 1) }
-    pub fn vlan_id(&self)            -> bool { test_bit(self.raw, 2) }
-    pub fn data_link_protocol(&self) -> bool { test_bit(self.raw, 3) }
-    pub fn dscp(&self)               -> bool { test_bit(self.raw, 4) }
-    pub fn transport_protocol(&self) -> bool { test_bit(self.raw, 5) }
-    pub fn ip_src(&self)             -> bool { test_bit(self.raw, 6) }
-    pub fn ip_dst(&self)             -> bool { test_bit(self.raw, 7) }
-    pub fn ip_v6(&self)              -> bool { test_bit(self.raw, 8) }
-    pub fn ip_src_prefix(&self)      -> bool { test_bit(self.raw, 9) }
-    pub fn ip_dst_prefix(&self)      -> bool { test_bit(self.raw, 10) }
-    pub fn port_src(&self)           -> bool { test_bit(self.raw, 11) }
-    pub fn port_dst(&self)           -> bool { test_bit(self.raw, 12) }
-    pub fn tcp_flags(&self)          -> bool { test_bit(self.raw, 13) }
-    pub fn encapsulation(&self)      -> bool { test_bit(self.raw, 14) }
-    pub fn vxlan_port(&self)         -> bool { test_bit(self.raw, 15) }
-    pub fn heartbeat(&self)          -> bool { test_bit(self.raw, 16) }
-
-    pub fn set_mac_src(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 0, set);
-    }
-
-    pub fn set_mac_dst(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 1, set);
-    }
-
-    pub fn set_vlan_id(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 2, set);
-    }
-
-    pub fn set_data_link_protocol(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 3, set);
-    }
-
-    pub fn set_dscp(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 4, set);
-    }
-
-    pub fn set_transport_protocol(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 5, set);
-    }
-
-    pub fn set_ip_src(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 6, set);
-    }
-
-    pub fn set_ip_dst(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 7, set);
-    }
-
-    pub fn set_ip_v6(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 8, set);
-    }
-
-    pub fn set_ip_src_prefix(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 9, set);
-    }
-
-    pub fn set_ip_dst_prefix(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 10, set);
-    }
-
-    pub fn set_port_src(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 11, set);
-    }
-
-    pub fn set_port_dst(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 12, set);
-    }
-
-    pub fn set_tcp_flags(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 13, set);
-    }
-
-    pub fn set_encapsulation(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 14, set);
-    }
-
-    pub fn set_vxlan_port(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 15, set);
-    }
-
-    pub fn set_heartbeat(&mut self, set: bool) {
-        self.raw = set_bit(self.raw, 16, set);
-    }
-}
-
 impl TryFrom<AnyIpCidr> for CIPAddr {
     type Error = ();
 
@@ -256,10 +154,8 @@ impl TryFrom<AnyIpCidr> for CIPAddr {
     }
 }
 
-impl From<PktMonFilter> for CPktMonFilter {
+impl From<PktMonFilter> for CPktMonUserFilter {
     fn from(filter: PktMonFilter) -> Self {
-        let mut flags = Flags { raw: 0 };
-
         // Validate we're not mixing IPv4 and IPv6 addresses
         if let OptionPair::Both(ip_src, ip_dst) = filter.ip {
             match (ip_src, ip_dst) {
@@ -273,15 +169,15 @@ impl From<PktMonFilter> for CPktMonFilter {
             }
         }
 
-        if matches!(filter.ip, OptionPair::Some(AnyIpCidr::V6(_)) | OptionPair::Both(AnyIpCidr::V6(_), _)) {
-            flags.set_ip_v6(true);
-        }
+        let ip_version = if matches!(filter.ip, OptionPair::Some(AnyIpCidr::V6(_)) | OptionPair::Both(AnyIpCidr::V6(_), _)) {
+            1
+        } else {
+            0
+        };
 
-        if filter.heartbeat {
-            flags.set_heartbeat(true);
-        }
+        CPktMonUserFilter {
+            size: 200,
 
-        CPktMonFilter {
             name: {
                 let mut arr = [0u8; 128];
                 
@@ -301,27 +197,20 @@ impl From<PktMonFilter> for CPktMonFilter {
 
             mac_src: {
                 match filter.mac.first() {
-                    Some(&mac) => {
-                        flags.set_mac_src(true);
-                        CMacAddr { addr: mac.0 }
-                    }
+                    Some(&mac) => CMacAddr { addr: mac.0 },
                     None => CMacAddr { addr: [0; 6] }
                 }
             },
 
             mac_dst: {
                 match filter.mac.second() {
-                    Some(&mac) => {
-                        flags.set_mac_dst(true);
-                        CMacAddr { addr: mac.0 }
-                    }
+                    Some(&mac) => CMacAddr { addr: mac.0 },
                     None => CMacAddr { addr: [0; 6] }
                 }
             },
 
             vlan: {
                 if let Some(vlan) = filter.vlan {
-                    flags.set_vlan_id(true);
                     vlan
                 } else {
                     0
@@ -330,17 +219,7 @@ impl From<PktMonFilter> for CPktMonFilter {
             
             protocol: {
                 if let Some(protocol) = filter.data_link_protocol {
-                    flags.set_data_link_protocol(true);
                     protocol.into()
-                } else {
-                    0
-                }
-            },
-
-            dscp: {
-                if let Some(dscp) = filter.dscp {
-                    flags.set_dscp(true);
-                    dscp as u16
                 } else {
                     0
                 }
@@ -348,76 +227,58 @@ impl From<PktMonFilter> for CPktMonFilter {
 
             transport_proto: {
                 if let Some(ref transport_proto) = filter.transport_protocol {
-                    flags.set_transport_protocol(true);
                     transport_proto.into()
                 } else {
                     0
                 }
             },
 
+            ip_v6: ip_version,
+
             ip_src: {
                 match filter.ip.first() {
                     Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
-                    Some(&ip) => {
-                        flags.set_ip_src(true);
-                        CIPAddr::try_from(ip).unwrap()
-                    }
+                    Some(&ip) => CIPAddr::try_from(ip).unwrap()
                 }
             },
 
             ip_dst: {
                 match filter.ip.second() {
                     Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
-                    Some(&ip) => {
-                        flags.set_ip_dst(true);
-                        CIPAddr::try_from(ip).unwrap()
-                    }
+                    Some(&ip) => CIPAddr::try_from(ip).unwrap()
                 }
             },
 
             ip_src_prefix: {
                 match filter.ip.first() {
                     Some(AnyIpCidr::Any) | None => 0,
-                    Some(&ip) => {
-                        flags.set_ip_src_prefix(ip.network_length().unwrap() > 0);
-                        ip.network_length().unwrap()
-                    }
+                    Some(&ip) => ip.network_length().unwrap()
                 }
             },
 
             ip_dst_prefix: {
                 match filter.ip.second() {
                     Some(AnyIpCidr::Any) | None => 0,
-                    Some(&ip) => {
-                        flags.set_ip_dst_prefix(ip.network_length().unwrap() > 0);
-                        ip.network_length().unwrap()
-                    }
+                    Some(&ip) => ip.network_length().unwrap()
                 }
             },
 
             port_src: {
                 match filter.port.first() {
-                    Some(&port) => {
-                        flags.set_port_src(true);
-                        port
-                    }
+                    Some(&port) => port,
                     None => 0,
                 }
             },
 
             port_dst: {
                 match filter.port.second() {
-                    Some(&port) => {
-                        flags.set_port_dst(true);
-                        port
-                    }
+                    Some(&port) => port,
                     None => 0,
                 }
             },
 
             tcp_flags: {
                 if let Some(TransportProtocol::FilteredTCP(tcp_flags)) = filter.transport_protocol {
-                    flags.set_tcp_flags(true);
                     tcp_flags.iter().fold(0, |acc, flag| acc | u8::from(*flag))
                 } else {
                     0
@@ -426,7 +287,6 @@ impl From<PktMonFilter> for CPktMonFilter {
 
             encapsulation: {
                 if filter.encapsulation.is_on() {
-                    flags.set_encapsulation(true);
                     0xFF
                 } else {
                     0
@@ -435,17 +295,25 @@ impl From<PktMonFilter> for CPktMonFilter {
             
             vxlan_port: {
                 if let Encapsulation::On(Some(vxlan_port)) = filter.encapsulation {
-                    flags.set_vxlan_port(true);
                     vxlan_port.0
                 } else {
                     0
                 }
             },
 
-            _padding: 0,
-            _reserved: [0; 18],
+            heartbeat: filter.heartbeat as u8,
+            
+            dscp: {
+                if let Some(dscp) = filter.dscp {
+                    dscp as u16
+                } else {
+                    0
+                }
+            },
 
-            flags, // Set last to ensure effects are applied
+            _padding1: [0; 4],
+            _padding2: 0,
+            _padding3: [0; 2],
         }
     }
 }
@@ -453,164 +321,37 @@ impl From<PktMonFilter> for CPktMonFilter {
 #[cfg(test)]
 #[allow(dead_code)]
 mod tests {
-    use std::str::FromStr;
-
-    use cidr::Ipv4Cidr;
-    use utf16string::{WString, LE};
-
-    use crate::filter::{TCPFlag, TransportProtocol, VXLANPort};
-
     use super::*;
 
-    impl CPktMonFilter {
-        pub unsafe fn from_bytes_unchecked(data: [u16; 108]) -> Self {
-            std::mem::transmute::<[u16; 108], CPktMonFilter>(data)
-        }
-
-        pub fn as_words(&self) -> [u16; 108] {
-            unsafe { std::mem::transmute::<CPktMonFilter, [u16; 108]>(*self) }
-        }
-
-        pub fn name(&self) -> WString<LE> {
-            let mut bytes: Vec<u8> = self.name.chunks(2)
-                .take_while(|&x| x[0] != 0 || x[1] != 0) // Stop at NULL terminator
-                .flat_map(|x| x.to_vec())
-                .collect();
-
-            if bytes.len() % 2 != 0 {
-                bytes.push(0);
-            }
-
-            WString::from_utf16le(bytes).expect("Invalid UTF-16LE string")
-        }
-    }
-
-    // TCP flag constants
-    const FIN: u8 = 0b00000001;
-    const SYN: u8 = 0b00000010;
-    const RST: u8 = 0b00000100;
-    const PSH: u8 = 0b00001000;
-    const ACK: u8 = 0b00010000;
-    const URG: u8 = 0b00100000;
-    const ECE: u8 = 0b01000000;
-    const CWR: u8 = 0b10000000;
-
-    // Filter Flags
-    const MAC_SRC            : u32 = 0b00000000000000000000000000000001;
-    const MAC_DST            : u32 = 0b00000000000000000000000000000010;
-    const VLAN_ID            : u32 = 0b00000000000000000000000000000100;
-    const DATA_LINK_PROTOCOL : u32 = 0b00000000000000000000000000001000;
-    const DSCP               : u32 = 0b00000000000000000000000000010000;
-    const TRANSPORT_PROTOCOL : u32 = 0b00000000000000000000000000100000;
-    const IP_SRC             : u32 = 0b00000000000000000000000001000000;
-    const IP_DST             : u32 = 0b00000000000000000000000010000000;
-    const IP_V6              : u32 = 0b00000000000000000000000100000000;
-    const IP_SRC_PREFIX      : u32 = 0b00000000000000000000001000000000;
-    const IP_DST_PREFIX      : u32 = 0b00000000000000000000010000000000;
-    const PORT_SRC           : u32 = 0b00000000000000000000100000000000;
-    const PORT_DST           : u32 = 0b00000000000000000001000000000000;
-    const TCP_FLAGS          : u32 = 0b00000000000000000010000000000000;
-    const ENCAPSULATION      : u32 = 0b00000000000000000100000000000000;
-    const VXLAN_PORT         : u32 = 0b00000000000000001000000000000000;
-    const HEARTBEAT          : u32 = 0b00000000000000010000000000000000;
-
     #[test]
-    fn test_bit_function() {
-        assert!(test_bit(0b00000001, 0));
-        assert!(test_bit(0b00000010, 1));
-        assert!(test_bit(0b00000100, 2));
+    fn sizeof_user_filter() {
+        assert_eq!(std::mem::size_of::<CPktMonUserFilter>(), 0xC8);
     }
 
     #[test]
-    fn sizeof_filter() {
-        assert_eq!(std::mem::size_of::<CPktMonFilter>(), 0xD8);
-    }
-
-    #[test]
-    fn field_offsets() {
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, name), 0x00);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, flags), 0x80);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, mac_src), 0x84);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, mac_dst), 0x8A);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, vlan), 0x90);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, protocol), 0x92);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, dscp), 0x94);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, transport_proto), 0x96);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, ip_src), 0x98);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, ip_dst), 0xA8);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, ip_src_prefix), 0xB8);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, ip_dst_prefix), 0xB9);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, port_src), 0xBA);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, port_dst), 0xBC);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, tcp_flags), 0xBE);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, _padding), 0xBF);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, encapsulation), 0xC0);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, vxlan_port), 0xC4);
-        assert_eq!(std::mem::offset_of!(CPktMonFilter, _reserved), 0xC6);
-    }
-
-    const DATA: [u16; 108] = [
-        0x0052, 0x0051, 0x0041, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0xfa60, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0006, 0x2301, 0x0045, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000, 0x0018, 0x5b05, 0x5b06, 0x0025,
-        0x00ff, 0x0000, 0xffff, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
-        0x0000, 0x0000, 0x0000, 0x0000
-    ];
-
-    #[test]
-    fn deserialize() {
-        let filter = unsafe { CPktMonFilter::from_bytes_unchecked(DATA) };
-        println!("{:?}", filter);
-
-        assert_eq!(WString::from("RQA"), filter.name());
-
-        assert_eq!(Flags { 
-            raw: IP_SRC | IP_SRC_PREFIX | PORT_SRC | PORT_DST | TRANSPORT_PROTOCOL | TCP_FLAGS | ENCAPSULATION | VXLAN_PORT
-        }, filter.flags);
-
-        assert_eq!(CIPv4Addr { addr: [1, 35, 69, 0], pad: [0; 12] }, unsafe { filter.ip_src.v4 });
-        assert_eq!(24, filter.ip_src_prefix);
-
-        assert_eq!(23301, filter.port_src);
-        assert_eq!(23302, filter.port_dst);
-
-        assert_eq!(u16::from(&TransportProtocol::TCP), filter.transport_proto);
-        assert_eq!(FIN | RST | URG, filter.tcp_flags);
-
-        assert_eq!(0xFF, filter.encapsulation);
-        assert_eq!(0xFFFF, filter.vxlan_port);
-    }
-
-    #[test]
-    fn serialize() {
-        let filter = PktMonFilter {
-            name: "RQA".to_string(),
-            
-            // ip_src: AnyIpCidr::V4(Ipv4Cidr::from_str("1.35.69.0/24").unwrap()),
-            ip: AnyIpCidr::V4(Ipv4Cidr::from_str("1.35.69.0/24").unwrap()).into(),
-
-            // port_src: Some(23301),
-            // port_dst: Some(23302),
-            port: (23301, 23302).into(),
-            // port: None.into(),
-
-            transport_protocol: Some(TransportProtocol::FilteredTCP(vec![TCPFlag::FIN, TCPFlag::RST, TCPFlag::URG])),
-
-            encapsulation: Encapsulation::On(Some(VXLANPort(0xFFFF))),
-
-            ..Default::default()
-        };
-        
-        assert_eq!(DATA, CPktMonFilter::from(filter).as_words());
+    fn field_offsets_user_filter() {
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, size), 0x00);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, name), 0x02);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, mac_src), 0x82);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, mac_dst), 0x88);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, vlan), 0x8E);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, protocol), 0x90);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, transport_proto), 0x92);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_v6), 0x93);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, _padding1), 0x94);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_src), 0x98);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_dst), 0xA8);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_src_prefix), 0xB8);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_dst_prefix), 0xB9);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, port_src), 0xBA);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, port_dst), 0xBC);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, tcp_flags), 0xBE);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, encapsulation), 0xBF);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, vxlan_port), 0xC0);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, heartbeat), 0xC2);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, _padding2), 0xC3);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, dscp), 0xC4);
+        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, _padding3), 0xC6);
     }
 }
 

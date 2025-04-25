@@ -12,6 +12,7 @@
 //! 
 //! - Easy-to-use high-level interface for packet capture
 //! - Filter support for protocol, ports, IP addresses, and more
+//! - Support for reading packets from ETL files
 //! 
 //! ## Requirements
 //! 
@@ -20,7 +21,7 @@
 //! 
 //! ## Usage
 //! 
-//! See [Capture] for more information.
+//! See [Capture] for more information on live capture and [EtlCapture] for working with ETL files.
 //! 
 //! ```no_run
 //! use pktmon::{Capture, filter::{PktMonFilter, TransportProtocol}};
@@ -53,14 +54,14 @@
 //! }
 //! ```
 
-use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, fmt::Debug, time::Duration};
+use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, fmt::Debug, time::Duration, path::Path};
 use driver::Driver;
-use etw::{EtwConsumer, EtwSession, Packet};
+use etw::{EtwConsumer, EtwSession, Packet, EtlConsumer};
 use filter::PktMonFilter;
 use log::{debug, info};
 
 mod util;
-mod etw;
+pub mod etw; // Export the etw module to allow direct access to EtlConsumer
 mod driver;
 mod c_filter;
 pub mod filter;
@@ -204,10 +205,11 @@ impl Capture {
     /// 
     /// This will ensure the driver isn't used after this.
     pub fn unload(self) -> io::Result<()> {
+        Driver::unload(&self.driver)?;
+
         // Take self and drop it to ensure the driver isn't used after this
         drop(self);
 
-        Driver::unload()?;
         Ok(())
     }
 
@@ -248,6 +250,135 @@ impl Capture {
 
 impl Drop for Capture {
     fn drop(&mut self) {
-        self.stop().unwrap();
+        if self.running {
+            if let Err(e) = self.stop() {
+                debug!("Failed to stop capture: {:?}", e);
+            }
+        }
+    }
+}
+
+/// A packet capture reader that processes packets from an ETL file.
+///
+/// The `EtlCapture` struct provides a high-level interface for reading network packets
+/// from an Event Trace Log (ETL) file. This is useful for offline analysis of packets
+/// captured using the PktMon driver or other ETW-based packet capture tools.
+///
+/// # Examples
+///
+/// ```no_run
+/// use pktmon::EtlCapture;
+/// use std::path::Path;
+///
+/// // Create a new ETL capture reader
+/// let mut etl_capture = EtlCapture::new("C:\\path\\to\\capture.etl").unwrap();
+///
+/// // Get all packets from the file
+/// let packets = etl_capture.packets().unwrap();
+/// println!("Read {} packets from ETL file", packets.len());
+///
+/// // Process each packet
+/// for packet in packets {
+///     println!("Packet payload size: {}", packet.payload.len());
+/// }
+/// ```
+///
+/// # Resource Cleanup
+///
+/// The `EtlCapture` struct implements `Drop` to ensure proper cleanup of resources.
+/// However, it's recommended to explicitly stop processing when done to handle any
+/// potential errors.
+pub struct EtlCapture {
+    consumer: EtlConsumer,
+}
+
+impl Debug for EtlCapture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PktMon ETL Capture")
+    }
+}
+
+impl EtlCapture {
+    /// Create a new ETL capture reader for the specified ETL file.
+    ///
+    /// # Arguments
+    ///
+    /// * `etl_path` - Path to the ETL file to process
+    ///
+    /// # Returns
+    ///
+    /// A result containing the `EtlCapture` or an error.
+    pub fn new<P: AsRef<Path>>(etl_path: P) -> io::Result<Self> {
+        let consumer = match EtlConsumer::new(etl_path) {
+            Ok(consumer) => consumer,
+            Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
+        };
+        
+        Ok(Self {
+            consumer,
+        })
+    }
+    
+    /// Start processing the ETL file.
+    ///
+    /// This function starts processing the ETL file in a background thread.
+    /// Packets can be retrieved using the `next_packet()` method.
+    ///
+    /// # Returns
+    ///
+    /// A result indicating success or an error.
+    pub fn start(&mut self) -> io::Result<()> {
+        match self.consumer.process() {
+            Ok(()) => Ok(()),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+        }
+    }
+    
+    /// Stop processing the ETL file.
+    ///
+    /// This function stops any ongoing processing and releases resources.
+    ///
+    /// # Returns
+    ///
+    /// A result indicating success or an error.
+    pub fn stop(&mut self) -> io::Result<()> {
+        match self.consumer.stop() {
+            Ok(()) => Ok(()),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)), 
+        }
+    }
+    
+    /// Get the next packet from the ETL file.
+    ///
+    /// Returns an error if processing hasn't been started or if there are no more packets.
+    ///
+    /// # Returns
+    ///
+    /// A result containing the next packet or an error.
+    pub fn next_packet(&self) -> Result<Packet, RecvError> {
+        self.consumer.receiver.recv()
+    }
+    
+    /// Process the ETL file synchronously and return all packets.
+    ///
+    /// This function blocks until the entire file has been processed or an error occurs.
+    /// All packets are collected and returned in a vector.
+    ///
+    /// # Returns
+    ///
+    /// A result containing a vector of packets or an error.
+    pub fn packets(&mut self) -> io::Result<Vec<Packet>> {
+        match self.consumer.process_sync() {
+            Ok(packets) => Ok(packets),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+        }
+    }
+}
+
+impl Drop for EtlCapture {
+    fn drop(&mut self) {
+        if let Err(e) = self.consumer.stop() {
+            debug!("Failed to stop ETL capture: {:?}", e);
+        }
     }
 }
