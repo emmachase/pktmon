@@ -7,7 +7,7 @@ use windows::core::s;
 use windows::Win32::Foundation::{NO_ERROR, WIN32_ERROR};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 
-use crate::c_filter::CPktMonUserFilter;
+use crate::legacy::c_filter::CPktMonUserFilter;
 use crate::filter::PktMonFilter;
 
 pub struct Driver {

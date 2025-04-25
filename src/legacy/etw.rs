@@ -1,7 +1,7 @@
 use std::{ffi::c_void, path::Path, sync::{mpsc::{self, Receiver, Sender}, Arc, RwLock}, thread::{self, JoinHandle}, time::Duration};
 
 use windows::{core::{self as win, GUID, PCWSTR, PSTR}, w, Win32::{Foundation::{GetLastError, ERROR_SUCCESS, ERROR_WMI_INSTANCE_NOT_FOUND, INVALID_HANDLE_VALUE, NO_ERROR}, System::Diagnostics::Etw::{CloseTrace, ControlTraceA, EnableTraceEx2, OpenTraceA, ProcessTrace, StartTraceA, TdhGetProperty, CONTROLTRACE_HANDLE, EVENT_CONTROL_CODE_DISABLE_PROVIDER, EVENT_CONTROL_CODE_ENABLE_PROVIDER, EVENT_RECORD, EVENT_TRACE_CONTROL_FLUSH, EVENT_TRACE_CONTROL_STOP, EVENT_TRACE_INDEPENDENT_SESSION_MODE, EVENT_TRACE_LOGFILEA, EVENT_TRACE_PROPERTIES, EVENT_TRACE_REAL_TIME_MODE, PROCESSTRACE_HANDLE, PROCESS_TRACE_MODE_EVENT_RECORD, PROCESS_TRACE_MODE_REAL_TIME, PROPERTY_DATA_DESCRIPTOR, TRACE_LEVEL_INFORMATION, WNODE_FLAG_TRACED_GUID}}};
-use crate::util::s_with_len;
+use crate::{util::s_with_len, Packet};
 use log::{debug, error, trace};
 
 s_with_len!(LOGGER_NAME, LOGGER_NAME_LEN, "PktMon-Consumer");
@@ -186,11 +186,6 @@ impl Drop for EtwSession {
             error!("Failed to close trace: {:?}", e);
         }
     }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct Packet {
-    pub payload: Vec<u8>,
 }
 
 struct ConsumerContext {

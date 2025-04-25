@@ -55,16 +55,28 @@
 //! ```
 
 use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, fmt::Debug, time::Duration, path::Path};
-use driver::Driver;
-use etw::{EtwConsumer, EtwSession, Packet, EtlConsumer};
+use legacy::{EtlConsumer, LegacyBackend};
 use filter::PktMonFilter;
 use log::{debug, info};
 
 mod util;
-mod etw;
-mod driver;
-mod c_filter;
+mod legacy;
 pub mod filter;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct Packet {
+    pub payload: Vec<u8>,
+}
+
+pub(crate) trait CaptureBackend: Debug + Send {
+    fn start(&mut self) -> io::Result<()>;
+    fn stop(&mut self) -> io::Result<()>;
+    fn unload(&self) -> io::Result<()>;
+    fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()>;
+    fn remove_all_filters(&mut self) -> io::Result<()>;
+    fn next_packet(&self) -> Result<Packet, RecvError>;
+    fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError>;
+}
 
 /// A packet capture instance that uses the Windows PktMon driver to capture network traffic.
 ///
@@ -130,18 +142,15 @@ pub mod filter;
 /// The `Capture` struct can be safely shared between threads using standard synchronization
 /// primitives like `Arc<Mutex<Capture>>`. See the examples directory for a threaded example.
 pub struct Capture {
-    driver: Driver,
-    etw: EtwSession,
-    consumer: Option<EtwConsumer>,
+    backend: Box<dyn CaptureBackend>,
     running: bool,
 }
 
 impl Debug for Capture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PktMon Capture {{ running: {:?} }}", self.running)
+        write!(f, "PktMon Capture {{ backend: {:?} }}", self.backend)
     }
 }
-
 
 impl Capture {
     /// Create a new capture instance.
@@ -149,9 +158,7 @@ impl Capture {
     /// Loads the PktMon driver and creates an ETW session.
     pub fn new() -> io::Result<Self> {
         Ok(Self { 
-            driver: Driver::new()?,
-            etw: EtwSession::new()?,
-            consumer: None,
+            backend: Box::new(LegacyBackend::new()?),
             running: false,
         })
     }
@@ -166,11 +173,7 @@ impl Capture {
 
         debug!("Starting capture...");
 
-        self.etw.activate()?;
-
-        self.consumer = Some(EtwConsumer::new()?);
-
-        self.driver.start_capture()?;
+        self.backend.start()?;
         self.running = true;
 
         info!("Capture started");
@@ -189,12 +192,7 @@ impl Capture {
         debug!("Stopping capture...");
 
         self.running = false;
-        self.driver.stop_capture()?;
-        self.etw.deactivate()?;
-        
-        if let Some(mut consumer) = self.consumer.take() {
-            consumer.stop()?;
-        }
+        self.backend.stop()?;
 
         info!("Capture stopped");
 
@@ -204,8 +202,12 @@ impl Capture {
     /// Unload the PktMon driver.
     /// 
     /// This will ensure the driver isn't used after this.
-    pub fn unload(self) -> io::Result<()> {
-        Driver::unload(&self.driver)?;
+    pub fn unload(mut self) -> io::Result<()> {
+        if self.running {
+            self.stop()?;
+        }
+
+        self.backend.unload()?;
 
         // Take self and drop it to ensure the driver isn't used after this
         drop(self);
@@ -215,13 +217,13 @@ impl Capture {
 
     /// Add a filter to the capture.
     pub fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()> {
-        self.driver.add_filter(filter)?;
+        self.backend.add_filter(filter)?;
         Ok(())
     }
 
     /// Remove all filters from the capture.
     pub fn remove_all_filters(&mut self) -> io::Result<()> {
-        self.driver.remove_all_filters()?;
+        self.backend.remove_all_filters()?;
         Ok(())
     }
 
@@ -229,22 +231,14 @@ impl Capture {
     /// 
     /// Returns an error if the capture isn't running.
     pub fn next_packet(&self) -> Result<Packet, RecvError> {
-        if let Some(ref consumer) = self.consumer {
-            consumer.receiver.recv()
-        } else {
-            Err(RecvError)
-        }
+        self.backend.next_packet()
     }
 
     /// Get the next packet from the capture with a timeout.
     /// 
     /// Returns an error if the capture isn't running or if the timeout is reached.
     pub fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError> {
-        if let Some(ref consumer) = self.consumer {
-            consumer.receiver.recv_timeout(timeout)
-        } else {
-            Err(RecvTimeoutError::Disconnected)
-        }
+        self.backend.next_packet_timeout(timeout)
     }
 }
 
