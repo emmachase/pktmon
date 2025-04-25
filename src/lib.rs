@@ -61,7 +61,7 @@ use filter::PktMonFilter;
 use log::{debug, info};
 
 mod util;
-pub mod etw; // Export the etw module to allow direct access to EtlConsumer
+mod etw;
 mod driver;
 mod c_filter;
 pub mod filter;

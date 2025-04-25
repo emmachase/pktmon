@@ -553,19 +553,6 @@ impl EtlConsumer {
         Ok(packets)
     }
     
-    /// Get an iterator over all the packets in the ETL file.
-    ///
-    /// This method processes the ETL file synchronously and returns an iterator
-    /// over all the packets. This is a convenience method that calls [`process_sync()`](EtlConsumer::process_sync)
-    /// internally.
-    ///
-    /// # Returns
-    ///
-    /// A result containing an iterator over packets or a Windows error.
-    pub fn packets(&mut self) -> win::Result<impl Iterator<Item = Packet>> {
-        Ok(self.process_sync()?.into_iter())
-    }
-    
     /// Stop processing the ETL file.
     ///
     /// This function stops any ongoing processing and releases resources.
