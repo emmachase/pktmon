@@ -2,7 +2,7 @@ use std::{ffi::OsStr, fmt::Debug, os::windows::ffi::OsStrExt};
 
 use cidr::AnyIpCidr;
 
-use crate::filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol};
+use crate::{ctypes::{CIPAddr, CIPv6Addr, CMacAddr}, filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol}};
 
 /*
  * NOTE: When two MACs, IPs, or ports are specified, the filter
@@ -11,7 +11,7 @@ use crate::filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol};
  */
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CPktMonUserFilter {
+pub struct CPktMonLegacyFilter {
     /// Structure size (195 or 200), we always use 200
     pub size: u16,
 
@@ -99,62 +99,8 @@ pub struct CPktMonUserFilter {
     _padding3: [u8; 2],
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct CMacAddr {
-    pub addr: [u8; 6],
-}
 
-#[repr(C)]
-#[derive(Copy, Clone, Eq)]
-pub union CIPAddr {
-    pub v4: CIPv4Addr,
-    pub v6: CIPv6Addr,
-}
-
-impl Debug for CIPAddr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            write!(f, "IpAddr({:?} or {:?})", self.v4, self.v6)
-        }
-    }
-}
-
-impl PartialEq for CIPAddr {
-    fn eq(&self, other: &Self) -> bool {
-        unsafe {
-            // No need to check v4 because they overlap in memory
-            self.v6 == other.v6
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct CIPv4Addr {
-    pub addr: [u8; 4],
-    pub pad: [u8; 12],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct CIPv6Addr {
-    pub addr: [u16; 8]
-}
-
-impl TryFrom<AnyIpCidr> for CIPAddr {
-    type Error = ();
-
-    fn try_from(ip: AnyIpCidr) -> Result<Self, Self::Error> {
-        match ip {
-            AnyIpCidr::Any => Err(()),
-            AnyIpCidr::V4(ip) => Ok(CIPAddr { v4: CIPv4Addr { addr: ip.first_address().octets(), pad: [0; 12] } }),
-            AnyIpCidr::V6(ip) => Ok(CIPAddr { v6: CIPv6Addr { addr: ip.first_address().segments() } }),
-        }
-    }
-}
-
-impl From<PktMonFilter> for CPktMonUserFilter {
+impl From<PktMonFilter> for CPktMonLegacyFilter {
     fn from(filter: PktMonFilter) -> Self {
         // Validate we're not mixing IPv4 and IPv6 addresses
         if let OptionPair::Both(ip_src, ip_dst) = filter.ip {
@@ -175,7 +121,7 @@ impl From<PktMonFilter> for CPktMonUserFilter {
             0
         };
 
-        CPktMonUserFilter {
+        CPktMonLegacyFilter {
             size: 200,
 
             name: {
@@ -325,33 +271,33 @@ mod tests {
 
     #[test]
     fn sizeof_user_filter() {
-        assert_eq!(std::mem::size_of::<CPktMonUserFilter>(), 0xC8);
+        assert_eq!(std::mem::size_of::<CPktMonLegacyFilter>(), 0xC8);
     }
 
     #[test]
     fn field_offsets_user_filter() {
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, size), 0x00);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, name), 0x02);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, mac_src), 0x82);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, mac_dst), 0x88);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, vlan), 0x8E);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, protocol), 0x90);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, transport_proto), 0x92);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_v6), 0x93);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, _padding1), 0x94);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_src), 0x98);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_dst), 0xA8);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_src_prefix), 0xB8);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, ip_dst_prefix), 0xB9);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, port_src), 0xBA);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, port_dst), 0xBC);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, tcp_flags), 0xBE);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, encapsulation), 0xBF);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, vxlan_port), 0xC0);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, heartbeat), 0xC2);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, _padding2), 0xC3);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, dscp), 0xC4);
-        assert_eq!(std::mem::offset_of!(CPktMonUserFilter, _padding3), 0xC6);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, size), 0x00);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, name), 0x02);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, mac_src), 0x82);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, mac_dst), 0x88);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, vlan), 0x8E);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, protocol), 0x90);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, transport_proto), 0x92);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_v6), 0x93);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, _padding1), 0x94);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_src), 0x98);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_dst), 0xA8);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_src_prefix), 0xB8);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_dst_prefix), 0xB9);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, port_src), 0xBA);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, port_dst), 0xBC);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, tcp_flags), 0xBE);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, encapsulation), 0xBF);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, vxlan_port), 0xC0);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, heartbeat), 0xC2);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, _padding2), 0xC3);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, dscp), 0xC4);
+        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, _padding3), 0xC6);
     }
 }
 

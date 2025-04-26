@@ -4,10 +4,10 @@ use std::mem::transmute;
 use log::{debug, trace};
 use windows::core as win;
 use windows::core::s;
-use windows::Win32::Foundation::{NO_ERROR, WIN32_ERROR};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
+use windows::Win32::Foundation::{GetLastError, HMODULE, NO_ERROR, WIN32_ERROR};
+use windows::Win32::System::LibraryLoader::{FreeLibrary, GetProcAddress, LoadLibraryA};
 
-use crate::legacy::c_filter::CPktMonUserFilter;
+use crate::legacy::c_filter::CPktMonLegacyFilter;
 use crate::filter::PktMonFilter;
 
 pub struct Driver {
@@ -35,7 +35,9 @@ impl CPktMonStart {
 }
 
 struct PktMonApi {
-    add_filter: extern "C" fn(*const CPktMonUserFilter) -> WIN32_ERROR,
+    module: HMODULE,
+
+    add_filter: extern "C" fn(*const CPktMonLegacyFilter) -> WIN32_ERROR,
     remove_all_filters: extern "C" fn() -> WIN32_ERROR,
     start_capture: extern "C" fn(*const CPktMonStart, *mut c_void) -> WIN32_ERROR,
     stop_capture: extern "C" fn(*mut CPktMonStatus) -> WIN32_ERROR,
@@ -48,13 +50,21 @@ impl Driver {
         unsafe {
             let module = LoadLibraryA(s!("PktMonApi.dll"))?;
 
+            macro_rules! get_proc_address {
+                ($name:expr) => {
+                    transmute(GetProcAddress(module, s!($name)).ok_or_else(|| win::Error::from(GetLastError()))?)
+                };
+            }
+
             let api = PktMonApi {
-                add_filter: transmute(GetProcAddress(module, s!("PktmonAddFilter")).unwrap()),
-                remove_all_filters: transmute(GetProcAddress(module, s!("PktmonRemoveAllFilters")).unwrap()),
-                start_capture: transmute(GetProcAddress(module, s!("PktmonStart")).unwrap()),
-                stop_capture: transmute(GetProcAddress(module, s!("PktmonStop")).unwrap()),
-                get_status: transmute(GetProcAddress(module, s!("PktmonGetStatus")).unwrap()),
-                unload: transmute(GetProcAddress(module, s!("PktmonUnload")).unwrap()),
+                module,
+
+                add_filter: get_proc_address!("PktmonAddFilter"),
+                remove_all_filters: get_proc_address!("PktmonRemoveAllFilters"),
+                start_capture: get_proc_address!("PktmonStart"),
+                stop_capture: get_proc_address!("PktmonStop"),
+                get_status: get_proc_address!("PktmonGetStatus"),
+                unload: get_proc_address!("PktmonUnload"),
             };
 
             trace!("Opened PktMon device");
@@ -139,5 +149,13 @@ impl Driver {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for Driver {
+    fn drop(&mut self) {
+        unsafe {
+            FreeLibrary(self.api.module);
+        }
     }
 }

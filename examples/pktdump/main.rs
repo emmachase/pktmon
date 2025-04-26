@@ -41,7 +41,7 @@ fn main() {
     {
         let running = running.clone();
         let sniffer = sniffer.clone();
-        std::thread::sleep(std::time::Duration::from_secs(3));
+        std::thread::sleep(std::time::Duration::from_secs(5));
 
         running.store(false, Ordering::Relaxed);
         let mut sniffer = sniffer.lock().unwrap();

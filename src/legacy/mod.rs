@@ -88,7 +88,7 @@ impl CaptureBackend for LegacyBackend {
     /// Unload the PktMon driver.
     /// 
     /// This will ensure the driver isn't used after this.
-    fn unload(&self) -> io::Result<()> {
+    fn unload(&mut self) -> io::Result<()> {
         Driver::unload(&self.driver)?;
 
         Ok(())
@@ -97,12 +97,6 @@ impl CaptureBackend for LegacyBackend {
     /// Add a filter to the capture.
     fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()> {
         self.driver.add_filter(filter)?;
-        Ok(())
-    }
-
-    /// Remove all filters from the capture.
-    fn remove_all_filters(&mut self) -> io::Result<()> {
-        self.driver.remove_all_filters()?;
         Ok(())
     }
 

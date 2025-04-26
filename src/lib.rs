@@ -58,9 +58,12 @@ use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, fmt::Debug, time::Durat
 use legacy::{EtlConsumer, LegacyBackend};
 use filter::PktMonFilter;
 use log::{debug, info};
+use realtime::RealTimeBackend;
 
 mod util;
+mod ctypes;
 mod legacy;
+mod realtime;
 pub mod filter;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -71,9 +74,8 @@ pub struct Packet {
 pub(crate) trait CaptureBackend: Debug + Send {
     fn start(&mut self) -> io::Result<()>;
     fn stop(&mut self) -> io::Result<()>;
-    fn unload(&self) -> io::Result<()>;
+    fn unload(&mut self) -> io::Result<()>;
     fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()>;
-    fn remove_all_filters(&mut self) -> io::Result<()>;
     fn next_packet(&self) -> Result<Packet, RecvError>;
     fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError>;
 }
@@ -154,11 +156,16 @@ impl Debug for Capture {
 
 impl Capture {
     /// Create a new capture instance.
-    /// 
-    /// Loads the PktMon driver and creates an ETW session.
     pub fn new() -> io::Result<Self> {
-        Ok(Self { 
-            backend: Box::new(LegacyBackend::new()?),
+        // Try to use the RealTimeBackend first (Windows 11+)
+        // Fall back to LegacyBackend if RealTimeBackend is not available
+        let backend: Box<dyn CaptureBackend> = match RealTimeBackend::new() {
+            Ok(backend) => Box::new(backend),
+            Err(_) => Box::new(LegacyBackend::new()?),
+        };
+
+        Ok(Self {
+            backend,
             running: false,
         })
     }
@@ -218,12 +225,6 @@ impl Capture {
     /// Add a filter to the capture.
     pub fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()> {
         self.backend.add_filter(filter)?;
-        Ok(())
-    }
-
-    /// Remove all filters from the capture.
-    pub fn remove_all_filters(&mut self) -> io::Result<()> {
-        self.backend.remove_all_filters()?;
         Ok(())
     }
 
