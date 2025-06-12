@@ -1,4 +1,4 @@
-use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, time::Duration, fmt::Debug};
+use std::{fmt::Debug, io, sync::mpsc::{Receiver, RecvError, RecvTimeoutError, TryRecvError}, time::Duration};
 
 use driver::Driver;
 use etw::{EtwConsumer, EtwSession};
@@ -16,6 +16,7 @@ pub struct LegacyBackend {
     driver: Driver,
     etw: EtwSession,
     consumer: Option<EtwConsumer>,
+    receiver: Option<Receiver<Packet>>,
     running: bool,
 }
 
@@ -34,6 +35,7 @@ impl LegacyBackend {
             driver: Driver::new()?,
             etw: EtwSession::new()?,
             consumer: None,
+            receiver: None,
             running: false,
         })
     }
@@ -52,7 +54,9 @@ impl CaptureBackend for LegacyBackend {
 
         self.etw.activate()?;
 
-        self.consumer = Some(EtwConsumer::new()?);
+        let (consumer, receiver) = EtwConsumer::new()?;
+        self.consumer = Some(consumer);
+        self.receiver = Some(receiver);
 
         self.driver.start_capture()?;
         self.running = true;
@@ -80,6 +84,8 @@ impl CaptureBackend for LegacyBackend {
             consumer.stop()?;
         }
 
+        self.receiver.take();
+
         info!("Capture stopped");
 
         Ok(())
@@ -104,8 +110,8 @@ impl CaptureBackend for LegacyBackend {
     /// 
     /// Returns an error if the capture isn't running.
     fn next_packet(&self) -> Result<Packet, RecvError> {
-        if let Some(ref consumer) = self.consumer {
-            consumer.receiver.recv()
+        if let Some(ref receiver) = self.receiver {
+            receiver.recv()
         } else {
             Err(RecvError)
         }
@@ -115,10 +121,27 @@ impl CaptureBackend for LegacyBackend {
     /// 
     /// Returns an error if the capture isn't running or if the timeout is reached.
     fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError> {
-        if let Some(ref consumer) = self.consumer {
-            consumer.receiver.recv_timeout(timeout)
+        if let Some(ref receiver) = self.receiver {
+            receiver.recv_timeout(timeout)
         } else {
             Err(RecvTimeoutError::Disconnected)
         }
+    }
+
+    fn try_next_packet(&self) -> Result<Packet, TryRecvError> {
+        if let Some(ref receiver) = self.receiver {
+            receiver.try_recv()
+        } else {
+            Err(TryRecvError::Disconnected)
+        }
+    }
+
+    #[cfg(feature = "tokio")]
+    /// Set a notify to be notified when a packet is received.
+    /// This call is ONLY valid AFTER the capture has been started.
+    /// 
+    /// This is only available if the `tokio` feature is enabled.
+    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
+        self.consumer.as_mut().expect("Consumer not initialized").set_notify(notify);
     }
 }

@@ -9,8 +9,12 @@ use crate::{filter::PktMonFilter, CaptureBackend, Packet};
 mod c_filter;
 mod c_api;
 
+#[derive(Debug)]
 struct MonitorContext {
     sender: mpsc::Sender<Packet>,
+
+    #[cfg(feature = "tokio")]
+    notify: Option<std::sync::Weak<tokio::sync::Notify>>,
 }
 
 type UserContext = *mut RwLock<MonitorContext>;
@@ -24,6 +28,8 @@ pub struct RealTimeBackend {
     stream: c_api::PacketMonitorRealTimeStream,
 
     receiver: mpsc::Receiver<Packet>,
+
+    context: Box<RwLock<MonitorContext>>,
 
     loaded: bool,
 }
@@ -106,6 +112,13 @@ extern "stdcall" fn data_callback(
 
     let sender = context.read().unwrap().sender.clone();
     sender.send(packet).unwrap();
+
+    #[cfg(feature = "tokio")]
+    if let Some(ref notify) = context.read().unwrap().notify {
+        if let Some(notify) = notify.upgrade() {
+            notify.notify_one();
+        }
+    }
 }
 
 impl RealTimeBackend {
@@ -123,8 +136,8 @@ impl RealTimeBackend {
 
         let (sender, receiver) = mpsc::channel();
 
-        let context_box = Box::new(RwLock::new(MonitorContext { sender }));
-        let context_ptr = Box::into_raw(context_box);
+        let context_box = Box::new(RwLock::new(MonitorContext { sender, notify: None }));
+        let context_ptr = &*context_box as *const _;
 
         let stream_config = c_api::PacketMonitorRealTimeStreamConfiguration {
             user_context: context_ptr as *mut c_void,
@@ -151,6 +164,8 @@ impl RealTimeBackend {
             handle,
             session,
             stream,
+
+            context: context_box,
 
             receiver,
 
@@ -267,6 +282,15 @@ impl CaptureBackend for RealTimeBackend {
     fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, mpsc::RecvTimeoutError> {
         debug!("Receiving packet with timeout");
         self.receiver.recv_timeout(timeout)
+    }
+
+    fn try_next_packet(&self) -> Result<Packet, mpsc::TryRecvError> {
+        self.receiver.try_recv()
+    }
+
+    #[cfg(feature = "tokio")]
+    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
+        self.context.write().unwrap().notify = Some(std::sync::Arc::downgrade(&notify));
     }
 }
 

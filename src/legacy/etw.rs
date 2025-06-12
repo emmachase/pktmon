@@ -192,6 +192,9 @@ struct ConsumerContext {
     running: bool,
 
     sender: Sender<Packet>,
+
+    #[cfg(feature = "tokio")]
+    notify: Option<std::sync::Weak<tokio::sync::Notify>>,
 }
 pub struct EtwConsumer {
     process_handle: PROCESSTRACE_HANDLE,
@@ -200,13 +203,11 @@ pub struct EtwConsumer {
 
     thread: Option<JoinHandle<()>>,
 
-    pub receiver: Receiver<Packet>,
-
     stopped: bool,
 }
 
 impl EtwConsumer {
-    pub fn new() -> win::Result<Self> {
+    pub fn new() -> win::Result<(Self, Receiver<Packet>)> {
         let mut trace = EVENT_TRACE_LOGFILEA::default();
         trace.LoggerName = PSTR::from_raw(LOGGER_NAME.0 as *mut u8);
         trace.Anonymous1.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD;
@@ -219,6 +220,9 @@ impl EtwConsumer {
         let mut boxed = Box::new(RwLock::new(ConsumerContext {
             running: true,
             sender,
+
+            #[cfg(feature = "tokio")]
+            notify: None,
         }));
         let context_ptr = &mut*boxed as *mut RwLock<ConsumerContext>; // Really yucky
 
@@ -226,7 +230,6 @@ impl EtwConsumer {
             process_handle: PROCESSTRACE_HANDLE::default(),
             context: Arc::new(boxed),
             thread: None,
-            receiver,
             stopped: false,
         };
 
@@ -256,7 +259,7 @@ impl EtwConsumer {
 
         debug!("EtwConsumer started");
 
-        Ok(this)
+        Ok((this, receiver))
     }
 
     pub fn stop(&mut self) -> win::Result<()> {
@@ -285,6 +288,11 @@ impl EtwConsumer {
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "tokio")]
+    pub fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
+        self.context.write().unwrap().notify = Some(std::sync::Arc::downgrade(&notify));
     }
 
     pub extern "system" fn event_record_callback(event_record: *mut EVENT_RECORD) {
@@ -342,6 +350,13 @@ impl EtwConsumer {
                     Ok(ctx) => {
                         if let Err(e) = ctx.sender.send(Packet { payload }) {
                             error!("Failed to send packet to channel: {:#?}", e);
+                        }
+
+                        #[cfg(feature = "tokio")]
+                        if let Some(ref notify) = ctx.notify {
+                            if let Some(notify) = notify.upgrade() {
+                                notify.notify_one();
+                            }
                         }
                     }
                     Err(e) => error!("Failed to acquire read lock: {:#?}", e),
@@ -430,6 +445,9 @@ impl EtlConsumer {
         let mut boxed = Box::new(RwLock::new(ConsumerContext {
             running: true,
             sender,
+
+            #[cfg(feature = "tokio")]
+            notify: None,
         }));
         let context_ptr = &mut*boxed as *mut RwLock<ConsumerContext>;
         

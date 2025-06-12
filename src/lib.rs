@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 //! # PktMon
 //! 
 //! PktMon is a library for capturing network packets on Windows using the
@@ -54,7 +52,7 @@
 //! }
 //! ```
 
-use std::{io, sync::mpsc::{RecvError, RecvTimeoutError}, fmt::Debug, time::Duration, path::Path};
+use std::{fmt::Debug, io, path::Path, sync::mpsc::{RecvError, RecvTimeoutError, TryRecvError}, time::Duration};
 use legacy::{EtlConsumer, LegacyBackend};
 use filter::PktMonFilter;
 use log::{debug, info};
@@ -65,6 +63,7 @@ mod ctypes;
 mod legacy;
 mod realtime;
 pub mod filter;
+pub mod stream;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Packet {
@@ -78,6 +77,60 @@ pub(crate) trait CaptureBackend: Debug + Send {
     fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()>;
     fn next_packet(&self) -> Result<Packet, RecvError>;
     fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError>;
+    fn try_next_packet(&self) -> Result<Packet, TryRecvError>;
+
+    #[cfg(feature = "tokio")]
+    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>);
+}
+
+#[derive(Debug)]
+enum DispatchCaptureBackend {
+    Legacy(LegacyBackend),
+    RealTime(RealTimeBackend),
+}
+
+macro_rules! dispatch {
+    ($backend:ident, $method:ident($($args:tt)*)) => {
+        match $backend {
+            DispatchCaptureBackend::Legacy(backend) => backend.$method($($args)*),
+            DispatchCaptureBackend::RealTime(backend) => backend.$method($($args)*),
+        }
+    };
+}
+
+impl CaptureBackend for DispatchCaptureBackend {
+    fn start(&mut self) -> io::Result<()> {
+        dispatch!(self, start())
+    }
+
+    fn stop(&mut self) -> io::Result<()> {
+        dispatch!(self, stop())
+    }
+
+    fn unload(&mut self) -> io::Result<()> {
+        dispatch!(self, unload())
+    }
+
+    fn add_filter(&mut self, filter: PktMonFilter) -> io::Result<()> {
+        dispatch!(self, add_filter(filter))
+    }
+
+    fn next_packet(&self) -> Result<Packet, RecvError> {
+        dispatch!(self, next_packet())
+    }
+
+    fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError> {
+        dispatch!(self, next_packet_timeout(timeout))
+    }
+
+    fn try_next_packet(&self) -> Result<Packet, TryRecvError> {
+        dispatch!(self, try_next_packet())
+    }
+
+    #[cfg(feature = "tokio")]
+    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
+        dispatch!(self, set_notify(notify))
+    }
 }
 
 /// A packet capture instance that uses the Windows PktMon driver to capture network traffic.
@@ -144,7 +197,7 @@ pub(crate) trait CaptureBackend: Debug + Send {
 /// The `Capture` struct can be safely shared between threads using standard synchronization
 /// primitives like `Arc<Mutex<Capture>>`. See the examples directory for a threaded example.
 pub struct Capture {
-    backend: Box<dyn CaptureBackend>,
+    backend: DispatchCaptureBackend,
     running: bool,
 }
 
@@ -159,9 +212,9 @@ impl Capture {
     pub fn new() -> io::Result<Self> {
         // Try to use the RealTimeBackend first (Windows 11+)
         // Fall back to LegacyBackend if RealTimeBackend is not available
-        let backend: Box<dyn CaptureBackend> = match RealTimeBackend::new() {
-            Ok(backend) => Box::new(backend),
-            Err(_) => Box::new(LegacyBackend::new()?),
+        let backend = match RealTimeBackend::new() {
+            Ok(backend) => DispatchCaptureBackend::RealTime(backend),
+            Err(_) => DispatchCaptureBackend::Legacy(LegacyBackend::new()?),
         };
 
         Ok(Self {
