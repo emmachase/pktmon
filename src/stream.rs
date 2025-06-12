@@ -41,6 +41,7 @@ impl Capture {
     pub fn stream(mut self) -> PacketStream {
         let notify = Arc::new(Notify::new());
 
+        self.backend.start();
         self.backend.set_notify(notify.clone());
 
         PacketStream { capture: self, notify }
