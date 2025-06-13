@@ -14,7 +14,9 @@ impl Capture {
     pub fn stream(mut self) -> std::io::Result<impl Stream<Item = Packet> + Unpin> {
         let notify = Arc::new(Notify::new());
 
-        self.backend.start()?;
+        // Start before setting notify as Consumer needs to be created first.
+        // It's okay if some notify permits are missed, since we will try_recv first anyways.
+        self.start()?; 
         self.backend.set_notify(notify.clone());
 
         Ok(async_stream::stream! {
