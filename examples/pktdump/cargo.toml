@@ -1,0 +1,10 @@
+[package]
+name = "pktdump"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+pktmon = { path = "../../" }
+colog = "1.3.0"
+log = "0.4.25"
