@@ -1,13 +1,20 @@
-use std::{alloc::Layout, ffi::{c_void, OsString}, os::windows::ffi::OsStringExt, ptr::slice_from_raw_parts, sync::{mpsc, RwLock}, time::Duration};
+use std::{
+    alloc::Layout,
+    ffi::{OsString, c_void},
+    os::windows::ffi::OsStringExt,
+    ptr::slice_from_raw_parts,
+    sync::{RwLock, mpsc},
+    time::Duration,
+};
 
 use c_api::{PacketMonitorDataSourceList, PacketMonitorPacketType};
 use log::{debug, error, info, trace, warn};
 use windows::w;
 
-use crate::{filter::PktMonFilter, CaptureBackend, Packet};
+use crate::{CaptureBackend, Packet, filter::PktMonFilter};
 
-mod c_filter;
 mod c_api;
+mod c_filter;
 
 #[derive(Debug)]
 struct MonitorContext {
@@ -29,68 +36,67 @@ pub struct RealTimeBackend {
 
     receiver: mpsc::Receiver<Packet>,
 
+    #[allow(dead_code)]
     context: Box<RwLock<MonitorContext>>,
 
     loaded: bool,
 }
 
 extern "stdcall" fn event_callback(
-    _context: *mut c_void, 
-    event_info: *const c_api::PacketMonitorStreamEventInfo, 
-    event_kind: c_api::PacketMonitorStreamEventKind
+    _context: *mut c_void,
+    event_info: *const c_api::PacketMonitorStreamEventInfo,
+    event_kind: c_api::PacketMonitorStreamEventKind,
 ) {
     match event_kind {
         c_api::PacketMonitorStreamEventKind::PacketMonitorStreamEventStarted => {
             let info = unsafe { &(*event_info).stream_start_info };
             debug!(
-                "Packet monitor stream started with buffer size {} and truncation size {}", 
-                info.packet_buffer_size_in_bytes, 
-                info.truncation_size
+                "Packet monitor stream started with buffer size {} and truncation size {}",
+                info.packet_buffer_size_in_bytes, info.truncation_size
             );
-        },
+        }
         c_api::PacketMonitorStreamEventKind::PacketMonitorStreamEventStopped => {
             let info = unsafe { &(*event_info).stream_stop_info };
             if info.is_fatal_error {
-                error!("Fatal packet monitor stream error with reason: {}", info.reason);
-            } else {
-                debug!(
-                    "Packet monitor stream stopped with reason: {}", 
+                error!(
+                    "Fatal packet monitor stream error with reason: {}",
                     info.reason
                 );
+            } else {
+                debug!("Packet monitor stream stopped with reason: {}", info.reason);
             }
-        },
+        }
         c_api::PacketMonitorStreamEventKind::PacketMonitorStreamEventFatalError => {
             error!("Fatal packet monitor stream event");
-        },
+        }
         c_api::PacketMonitorStreamEventKind::PacketMonitorStreamEventProcessInfo => {
             let info = unsafe { &(*event_info).stream_process_info };
             if info.is_warning {
                 warn!(
-                    "Packet monitor stream warning reason: {}, packet length: {}", 
-                    info.reason,
-                    info.packet_length
+                    "Packet monitor stream warning reason: {}, packet length: {}",
+                    info.reason, info.packet_length
                 );
             } else {
                 error!(
-                    "Packet monitor stream error reason: {}, packet length: {}", 
-                    info.reason,
-                    info.packet_length
+                    "Packet monitor stream error reason: {}, packet length: {}",
+                    info.reason, info.packet_length
                 );
             }
-        },
+        }
     }
 }
 
 extern "stdcall" fn data_callback(
     context: *mut c_void,
-    data: *const c_api::PacketMonitorStreamDataDescriptor
+    data: *const c_api::PacketMonitorStreamDataDescriptor,
 ) {
     let context = unsafe { &mut *(context as UserContext) };
 
     let descriptor = unsafe { &(*data) };
 
-    let metadata: &c_api::PacketMonitorStreamMetadata = unsafe { 
-        &*(descriptor.data.add(descriptor.metadata_offset as usize) as *const c_api::PacketMonitorStreamMetadata) 
+    let metadata: &c_api::PacketMonitorStreamMetadata = unsafe {
+        &*(descriptor.data.add(descriptor.metadata_offset as usize)
+            as *const c_api::PacketMonitorStreamMetadata)
     };
 
     trace!("Packet type: {:?}", metadata.packet_type);
@@ -101,14 +107,15 @@ extern "stdcall" fn data_callback(
         return;
     }
 
-    let packet_payload = unsafe { 
-        (descriptor.data as *const u8).add(descriptor.packet_offset as usize) 
-    };
+    let packet_payload =
+        unsafe { (descriptor.data as *const u8).add(descriptor.packet_offset as usize) };
     let packet_payload = slice_from_raw_parts(packet_payload, descriptor.packet_length as usize);
     let mut packet_payload_vec = Vec::new();
     packet_payload_vec.extend_from_slice(unsafe { &*packet_payload });
 
-    let packet = Packet { payload: packet_payload_vec };
+    let packet = Packet {
+        payload: packet_payload_vec,
+    };
 
     let sender = context.read().unwrap().sender.clone();
     sender.send(packet).unwrap();
@@ -126,7 +133,12 @@ impl RealTimeBackend {
         let api = c_api::PacketMonitorApi::new()?;
 
         let mut handle = c_api::PacketMonitorHandle::default();
-        (api.initialize)(c_api::PACKETMONITOR_API_VERSION, std::ptr::null_mut(), &mut handle).ok()?;
+        (api.initialize)(
+            c_api::PACKETMONITOR_API_VERSION,
+            std::ptr::null_mut(),
+            &mut handle,
+        )
+        .ok()?;
         trace!("Initialized handle {:?}", handle);
 
         let mut session = c_api::PacketMonitorSession::default();
@@ -136,7 +148,12 @@ impl RealTimeBackend {
 
         let (sender, receiver) = mpsc::channel();
 
-        let context_box = Box::new(RwLock::new(MonitorContext { sender, notify: None }));
+        let context_box = Box::new(RwLock::new(MonitorContext {
+            sender,
+
+            #[cfg(feature = "tokio")]
+            notify: None,
+        }));
         let context_ptr = &*context_box as *const _;
 
         let stream_config = c_api::PacketMonitorRealTimeStreamConfiguration {
@@ -144,15 +161,11 @@ impl RealTimeBackend {
             event_callback: event_callback as *mut _,
             data_callback: data_callback as *mut _,
             buffer_size_multiplier: 5, // Idk if this is a good default
-            truncation_size: 9000, // Max value
+            truncation_size: 9000,     // Max value
         };
 
         let mut stream = c_api::PacketMonitorRealTimeStream::default();
-        (api.create_realtime_stream)(
-            handle,
-            &stream_config, 
-            &mut stream
-        ).ok()?;
+        (api.create_realtime_stream)(handle, &stream_config, &mut stream).ok()?;
 
         trace!("Created stream {:?}", stream);
 
@@ -175,7 +188,9 @@ impl RealTimeBackend {
 
     // TODO: Expose this in the API, allow for filtering components
     #[allow(dead_code)]
-    fn list_data_sources(&self) -> std::io::Result<Vec<c_api::PacketMonitorDataSourceSpecification>> {
+    fn list_data_sources(
+        &self,
+    ) -> std::io::Result<Vec<c_api::PacketMonitorDataSourceSpecification>> {
         let mut bytes_needed = 0;
 
         (self.api.enum_data_sources)(
@@ -184,12 +199,14 @@ impl RealTimeBackend {
             false,
             0,
             &mut bytes_needed,
-            std::ptr::null_mut()
-        ).ok()?;
+            std::ptr::null_mut(),
+        )
+        .ok()?;
 
         let align = std::mem::align_of::<PacketMonitorDataSourceList>();
         let layout = Layout::from_size_align(bytes_needed as usize, align).unwrap();
-        let buffer: *mut PacketMonitorDataSourceList = unsafe { std::alloc::alloc_zeroed(layout).cast() };
+        let buffer: *mut PacketMonitorDataSourceList =
+            unsafe { std::alloc::alloc_zeroed(layout).cast() };
 
         trace!("Bytes needed: {}, align: {}", bytes_needed, align);
 
@@ -199,13 +216,20 @@ impl RealTimeBackend {
             false,
             bytes_needed,
             &mut bytes_needed,
-            buffer
-        ).ok()?;
+            buffer,
+        )
+        .ok()?;
 
         let buf_as_slice = slice_from_raw_parts(buffer as *const u8, bytes_needed as usize);
         let mut vec = Vec::<u8>::new();
         vec.extend_from_slice(unsafe { &*buf_as_slice });
-        trace!("Buffer hexdump: {:?}", vec.iter().map(|b| format!("{:02x}", b)).collect::<Vec<String>>().join(" "));
+        trace!(
+            "Buffer hexdump: {:?}",
+            vec.iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<String>>()
+                .join(" ")
+        );
 
         let mut result_vec = Vec::<c_api::PacketMonitorDataSourceSpecification>::new();
 
@@ -220,16 +244,33 @@ impl RealTimeBackend {
                     &**(ptrptr.add(i as usize))
                 };
 
-                let name = OsString::from_wide(&data_source.name[..data_source.name.iter().position(|&c| c == 0).unwrap_or(data_source.name.len())]);
-                let description = OsString::from_wide(&data_source.description[..data_source.description.iter().position(|&c| c == 0).unwrap_or(data_source.description.len())]);
+                let name = OsString::from_wide(
+                    &data_source.name[..data_source
+                        .name
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(data_source.name.len())],
+                );
+                let description = OsString::from_wide(
+                    &data_source.description[..data_source
+                        .description
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(data_source.description.len())],
+                );
 
-                trace!("Data source: {:?} - {:?} - id: {} - is_present: {}", name, description, data_source.id, data_source.is_present);
+                trace!(
+                    "Data source: {:?} - {:?} - id: {} - is_present: {}",
+                    name, description, data_source.id, data_source.is_present
+                );
 
                 result_vec.push(data_source.clone());
             }
         };
 
-        unsafe { std::alloc::dealloc(buffer.cast(), layout); }
+        unsafe {
+            std::alloc::dealloc(buffer.cast(), layout);
+        }
 
         Ok(result_vec)
     }

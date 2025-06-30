@@ -1,39 +1,39 @@
 //! # PktMon
-//! 
+//!
 //! PktMon is a library for capturing network packets on Windows using the
 //! PktMon driver, which is included by default with Windows 10 and later.
-//! 
+//!
 //! See [here](https://learn.microsoft.com/en-us/windows-server/networking/technologies/pktmon/pktmon)
 //! for more information about the PktMon service.
-//! 
+//!
 //! ## Features
-//! 
+//!
 //! - Easy-to-use high-level interface for packet capture
 //! - Filter support for protocol, ports, IP addresses, and more
 //! - Support for reading packets from ETL files
-//! 
+//!
 //! ## Requirements
-//! 
+//!
 //! - Windows 10 or later
 //! - Administrator privileges are required to talk to the PktMon service
-//! 
+//!
 //! ## Usage
-//! 
+//!
 //! See [Capture] for more information on live capture and [EtlCapture] for working with ETL files.
-//! 
+//!
 //! ```no_run
 //! use pktmon::{Capture, filter::{PktMonFilter, TransportProtocol}};
-//! 
+//!
 //! fn main() {
 //!     // Create a new capture instance
 //!     let mut capture = Capture::new().unwrap();
-//! 
+//!
 //!     // Add a filter to capture UDP traffic on port 1234
 //!     capture.add_filter(PktMonFilter {
 //!         name: "UDP Filter".to_string(),
 //!         transport_protocol: Some(TransportProtocol::UDP),
 //!         port: 1234.into(),
-//! 
+//!
 //!         ..PktMonFilter::default()
 //!     }).unwrap();
 //!     
@@ -52,18 +52,24 @@
 //! }
 //! ```
 
-use std::{fmt::Debug, io, path::Path, sync::mpsc::{RecvError, RecvTimeoutError, TryRecvError}, time::Duration};
-use legacy::{EtlConsumer, LegacyBackend};
 use filter::PktMonFilter;
+use legacy::{EtlConsumer, LegacyBackend};
 use log::{debug, info};
 use realtime::RealTimeBackend;
+use std::{
+    fmt::Debug,
+    io,
+    path::Path,
+    sync::mpsc::{RecvError, RecvTimeoutError, TryRecvError},
+    time::Duration,
+};
 
-mod util;
 mod ctypes;
+pub mod filter;
 mod legacy;
 mod realtime;
-pub mod filter;
 pub mod stream;
+mod util;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Packet {
@@ -224,7 +230,7 @@ impl Capture {
     }
 
     /// Start the capture.
-    /// 
+    ///
     /// Ensure to add filters before starting the capture.
     pub fn start(&mut self) -> io::Result<()> {
         if self.running {
@@ -237,12 +243,12 @@ impl Capture {
         self.running = true;
 
         info!("Capture started");
-        
+
         Ok(())
     }
 
     /// Stop the capture.
-    /// 
+    ///
     /// You may still receive packets after stopping the capture.
     pub fn stop(&mut self) -> io::Result<()> {
         if !self.running {
@@ -260,7 +266,7 @@ impl Capture {
     }
 
     /// Unload the PktMon driver.
-    /// 
+    ///
     /// This will ensure the driver isn't used after this.
     pub fn unload(mut self) -> io::Result<()> {
         if self.running {
@@ -282,14 +288,21 @@ impl Capture {
     }
 
     /// Get the next packet from the capture.
-    /// 
+    ///
     /// Returns an error if the capture isn't running.
     pub fn next_packet(&self) -> Result<Packet, RecvError> {
         self.backend.next_packet()
     }
 
+    /// Try to get the next packet from the capture.
+    ///
+    /// Returns an error if the capture isn't running.
+    pub fn try_next_packet(&self) -> Result<Packet, TryRecvError> {
+        self.backend.try_next_packet()
+    }
+
     /// Get the next packet from the capture with a timeout.
-    /// 
+    ///
     /// Returns an error if the capture isn't running or if the timeout is reached.
     pub fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError> {
         self.backend.next_packet_timeout(timeout)
@@ -361,12 +374,10 @@ impl EtlCapture {
             Ok(consumer) => consumer,
             Err(e) => return Err(io::Error::new(io::ErrorKind::Other, e)),
         };
-        
-        Ok(Self {
-            consumer,
-        })
+
+        Ok(Self { consumer })
     }
-    
+
     /// Start processing the ETL file.
     ///
     /// This function starts processing the ETL file in a background thread.
@@ -381,7 +392,7 @@ impl EtlCapture {
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
-    
+
     /// Stop processing the ETL file.
     ///
     /// This function stops any ongoing processing and releases resources.
@@ -392,10 +403,10 @@ impl EtlCapture {
     pub fn stop(&mut self) -> io::Result<()> {
         match self.consumer.stop() {
             Ok(()) => Ok(()),
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)), 
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
         }
     }
-    
+
     /// Get the next packet from the ETL file.
     ///
     /// Returns an error if processing hasn't been started or if there are no more packets.
@@ -406,7 +417,7 @@ impl EtlCapture {
     pub fn next_packet(&self) -> Result<Packet, RecvError> {
         self.consumer.receiver.recv()
     }
-    
+
     /// Process the ETL file synchronously and return all packets.
     ///
     /// This function blocks until the entire file has been processed or an error occurs.
