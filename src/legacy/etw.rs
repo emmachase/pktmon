@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{Packet, util::s_with_len};
+use crate::{Packet, PacketPayload, util::s_with_len};
 use log::{debug, error, trace};
 use windows::{
     Win32::{
@@ -348,7 +348,7 @@ impl EtwConsumer {
             if record.EventHeader.EventDescriptor.Id == 160 {
                 let packet_type = match get_event_property_value_u32(event_record, w!("PacketType"))
                 {
-                    Ok(size) => size,
+                    Ok(packet_type) => packet_type,
                     Err(e) => {
                         error!("Failed to get PacketType {:#?}", e);
                         return;
@@ -381,10 +381,26 @@ impl EtwConsumer {
                     }
                 };
 
+                let component_id =
+                    match get_event_property_value_u16(event_record, w!("ComponentId")) {
+                        Ok(component_id) => component_id,
+                        Err(e) => {
+                            error!("Failed to get ComponentId {:#?}", e);
+                            return;
+                        }
+                    };
+
                 trace!("Received packet with payload size: {:?}", payload.len());
                 match context.read() {
                     Ok(ctx) => {
-                        if let Err(e) = ctx.sender.send(Packet { payload }) {
+                        if let Err(e) = ctx.sender.send(Packet {
+                            component_id,
+                            payload: match packet_type {
+                                1 => PacketPayload::Ethernet(payload),
+                                2 => PacketPayload::WiFi(payload),
+                                _ => PacketPayload::Unknown(payload),
+                            },
+                        }) {
                             error!("Failed to send packet to channel: {:#?}", e);
                         }
 
@@ -677,6 +693,32 @@ unsafe fn get_event_property_value_u32(
 ) -> win::Result<u32> {
     unsafe {
         let mut bytes = [0; std::mem::size_of::<u32>()];
+
+        let error = TdhGetProperty(
+            event_record,
+            None,
+            &[PROPERTY_DATA_DESCRIPTOR {
+                PropertyName: property_name.0 as u64,
+                ArrayIndex: 0,
+                Reserved: 0,
+            }],
+            &mut bytes,
+        );
+
+        if error != ERROR_SUCCESS.0 {
+            return Err(GetLastError().into());
+        }
+
+        Ok(std::mem::transmute(bytes))
+    }
+}
+
+unsafe fn get_event_property_value_u16(
+    event_record: *mut EVENT_RECORD,
+    property_name: PCWSTR,
+) -> win::Result<u16> {
+    unsafe {
+        let mut bytes = [0; std::mem::size_of::<u16>()];
 
         let error = TdhGetProperty(
             event_record,

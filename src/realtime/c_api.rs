@@ -1,9 +1,13 @@
 use std::{ffi::c_void, mem::transmute};
 
-use windows::core as win;
 use windows::Win32::Foundation::{GetLastError, HMODULE};
 use windows::Win32::System::LibraryLoader::FreeLibrary;
-use windows::{core::{HRESULT, PCWSTR}, s, Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA}};
+use windows::core as win;
+use windows::{
+    Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA},
+    core::{HRESULT, PCWSTR},
+    s,
+};
 
 use crate::ctypes::{CIPAddr, CMacAddr};
 
@@ -91,16 +95,35 @@ pub enum PacketMonitorPacketType {
     PktMonPayload_L4Payload,
 }
 
+impl TryFrom<u16> for PacketMonitorPacketType {
+    type Error = ();
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            x if x == Self::PktMonPayload_Unknown as u16 => Ok(Self::PktMonPayload_Unknown),
+            x if x == Self::PktMonPayload_Ethernet as u16 => Ok(Self::PktMonPayload_Ethernet),
+            x if x == Self::PktMonPayload_WiFi as u16 => Ok(Self::PktMonPayload_WiFi),
+            x if x == Self::PktMonPayload_IP as u16 => Ok(Self::PktMonPayload_IP),
+            x if x == Self::PktMonPayload_HTTP as u16 => Ok(Self::PktMonPayload_HTTP),
+            x if x == Self::PktMonPayload_TCP as u16 => Ok(Self::PktMonPayload_TCP),
+            x if x == Self::PktMonPayload_UDP as u16 => Ok(Self::PktMonPayload_UDP),
+            x if x == Self::PktMonPayload_ARP as u16 => Ok(Self::PktMonPayload_ARP),
+            x if x == Self::PktMonPayload_ICMP as u16 => Ok(Self::PktMonPayload_ICMP),
+            x if x == Self::PktMonPayload_ESP as u16 => Ok(Self::PktMonPayload_ESP),
+            x if x == Self::PktMonPayload_AH as u16 => Ok(Self::PktMonPayload_AH),
+            x if x == Self::PktMonPayload_L4Payload as u16 => Ok(Self::PktMonPayload_L4Payload),
+            _ => Err(()),
+        }
+    }
+}
+
 pub type PacketMonitorStreamEventCallback = extern "stdcall" fn(
-    context: *mut c_void, 
-    event_info: *const PacketMonitorStreamEventInfo, 
-    event_kind: PacketMonitorStreamEventKind
+    context: *mut c_void,
+    event_info: *const PacketMonitorStreamEventInfo,
+    event_kind: PacketMonitorStreamEventKind,
 );
 
-pub type PacketMonitorStreamDataCallback = extern "stdcall" fn(
-    context: *mut c_void,
-    data: *const PacketMonitorStreamDataDescriptor
-);
+pub type PacketMonitorStreamDataCallback =
+    extern "stdcall" fn(context: *mut c_void, data: *const PacketMonitorStreamDataDescriptor);
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug)]
@@ -129,7 +152,7 @@ pub struct PacketMonitorStreamMetadata {
     pub drop_reason: u32,
     pub drop_location: u32,
     pub processor: u16,
-    pub timestamp: u64,
+    pub timestamp: i64,
 }
 
 #[repr(C)]
@@ -159,11 +182,34 @@ pub struct PacketMonitorDataSourceSpecification {
 
     pub id: u32,
     pub secondary_id: u32,
-    
+
     pub parent_id: u32,
-    
+
     pub is_present: u32,
     pub detail: PacketMonitorDataSourceDetail,
+}
+
+#[allow(dead_code)]
+impl PacketMonitorDataSourceSpecification {
+    pub fn name(&self) -> String {
+        let name = self
+            .name
+            .iter()
+            .take_while(|&&c| c != 0)
+            .copied()
+            .collect::<Vec<u16>>();
+        String::from_utf16_lossy(&name)
+    }
+
+    pub fn description(&self) -> String {
+        let description = self
+            .description
+            .iter()
+            .take_while(|&&c| c != 0)
+            .copied()
+            .collect::<Vec<u16>>();
+        String::from_utf16_lossy(&description)
+    }
 }
 
 #[repr(C)]
@@ -194,17 +240,46 @@ pub const PACKETMONITOR_API_VERSION: u32 = 0x00010000;
 pub struct PacketMonitorApi {
     module: HMODULE,
 
-    pub initialize: extern "stdcall" fn(api_version: u32, reserved: *mut c_void, handle: *mut PacketMonitorHandle) -> HRESULT,
+    pub initialize: extern "stdcall" fn(
+        api_version: u32,
+        reserved: *mut c_void,
+        handle: *mut PacketMonitorHandle,
+    ) -> HRESULT,
     pub uninitialize: extern "stdcall" fn(handle: PacketMonitorHandle),
-    pub create_live_session: extern "stdcall" fn(handle: PacketMonitorHandle, name: PCWSTR, session: *mut PacketMonitorSession) -> HRESULT,
-    pub set_session_active: extern "stdcall" fn(session: PacketMonitorSession, active: bool) -> HRESULT,
-    pub create_realtime_stream: extern "stdcall" fn(handle: PacketMonitorHandle, configuration: *const PacketMonitorRealTimeStreamConfiguration, realtime_stream: *mut PacketMonitorRealTimeStream) -> HRESULT,
-    pub attach_output_to_session: extern "stdcall" fn(session: PacketMonitorSession, output_handle: PacketMonitorRealTimeStream) -> HRESULT,
+    pub create_live_session: extern "stdcall" fn(
+        handle: PacketMonitorHandle,
+        name: PCWSTR,
+        session: *mut PacketMonitorSession,
+    ) -> HRESULT,
+    pub set_session_active:
+        extern "stdcall" fn(session: PacketMonitorSession, active: bool) -> HRESULT,
+    pub create_realtime_stream: extern "stdcall" fn(
+        handle: PacketMonitorHandle,
+        configuration: *const PacketMonitorRealTimeStreamConfiguration,
+        realtime_stream: *mut PacketMonitorRealTimeStream,
+    ) -> HRESULT,
+    pub attach_output_to_session: extern "stdcall" fn(
+        session: PacketMonitorSession,
+        output_handle: PacketMonitorRealTimeStream,
+    ) -> HRESULT,
     pub close_session_handle: extern "stdcall" fn(session: PacketMonitorSession),
     pub close_realtime_stream: extern "stdcall" fn(realtime_stream: PacketMonitorRealTimeStream),
-    pub add_capture_constraint: extern "stdcall" fn(session: PacketMonitorSession, capture_constraint: *const PacketMonitorProtocolConstraint) -> HRESULT,
-    pub enum_data_sources: extern "stdcall" fn(handle: PacketMonitorHandle, source_kind: PacketMonitorDataSourceKind, show_hidden: bool, buffer_capacity: u32, bytes_needed: *mut u32, data_source_list: *mut PacketMonitorDataSourceList) -> HRESULT,
-    pub add_single_data_source_to_session: extern "stdcall" fn(session: PacketMonitorSession, data_source: *const PacketMonitorDataSourceSpecification) -> HRESULT,
+    pub add_capture_constraint: extern "stdcall" fn(
+        session: PacketMonitorSession,
+        capture_constraint: *const PacketMonitorProtocolConstraint,
+    ) -> HRESULT,
+    pub enum_data_sources: extern "stdcall" fn(
+        handle: PacketMonitorHandle,
+        source_kind: PacketMonitorDataSourceKind,
+        show_hidden: bool,
+        buffer_capacity: u32,
+        bytes_needed: *mut u32,
+        data_source_list: *mut PacketMonitorDataSourceList,
+    ) -> HRESULT,
+    pub add_single_data_source_to_session: extern "stdcall" fn(
+        session: PacketMonitorSession,
+        data_source: *const PacketMonitorDataSourceSpecification,
+    ) -> HRESULT,
 }
 
 impl PacketMonitorApi {
@@ -214,7 +289,10 @@ impl PacketMonitorApi {
 
             macro_rules! get_proc_address {
                 ($name:expr) => {
-                    transmute(GetProcAddress(module, s!($name)).ok_or_else(|| win::Error::from(GetLastError()))?)
+                    transmute(
+                        GetProcAddress(module, s!($name))
+                            .ok_or_else(|| win::Error::from(GetLastError()))?,
+                    )
                 };
             }
 
@@ -231,7 +309,9 @@ impl PacketMonitorApi {
                 close_realtime_stream: get_proc_address!("PacketMonitorCloseRealtimeStream"),
                 add_capture_constraint: get_proc_address!("PacketMonitorAddCaptureConstraint"),
                 enum_data_sources: get_proc_address!("PacketMonitorEnumDataSources"),
-                add_single_data_source_to_session: get_proc_address!("PacketMonitorAddSingleDataSourceToSession"),
+                add_single_data_source_to_session: get_proc_address!(
+                    "PacketMonitorAddSingleDataSourceToSession"
+                ),
             })
         }
     }
@@ -244,4 +324,3 @@ impl Drop for PacketMonitorApi {
         }
     }
 }
-

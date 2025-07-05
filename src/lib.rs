@@ -72,8 +72,47 @@ pub mod stream;
 mod util;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum PacketPayload {
+    Unknown(Vec<u8>),
+    Ethernet(Vec<u8>),
+    WiFi(Vec<u8>),
+    IP(Vec<u8>),
+    HTTP(Vec<u8>),
+    TCP(Vec<u8>),
+    UDP(Vec<u8>),
+    ARP(Vec<u8>),
+    ICMP(Vec<u8>),
+    ESP(Vec<u8>),
+    AH(Vec<u8>),
+    L4Payload(Vec<u8>),
+}
+
+impl PacketPayload {
+    pub fn to_vec(&self) -> &Vec<u8> {
+        match self {
+            PacketPayload::Unknown(payload) => payload,
+            PacketPayload::Ethernet(payload) => payload,
+            PacketPayload::WiFi(payload) => payload,
+            PacketPayload::IP(payload) => payload,
+            PacketPayload::HTTP(payload) => payload,
+            PacketPayload::TCP(payload) => payload,
+            PacketPayload::UDP(payload) => payload,
+            PacketPayload::ARP(payload) => payload,
+            PacketPayload::ICMP(payload) => payload,
+            PacketPayload::ESP(payload) => payload,
+            PacketPayload::AH(payload) => payload,
+            PacketPayload::L4Payload(payload) => payload,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct Packet {
-    pub payload: Vec<u8>,
+    /// Component ID where the packet was captured
+    /// Use this to group packets into individual streams
+    pub component_id: u16,
+    /// Packet payload differentiated by captured protocol
+    pub payload: PacketPayload,
 }
 
 pub(crate) trait CaptureBackend: Debug + Send {

@@ -11,7 +11,7 @@ use c_api::{PacketMonitorDataSourceList, PacketMonitorPacketType};
 use log::{debug, error, info, trace, warn};
 use windows::w;
 
-use crate::{CaptureBackend, Packet, filter::PktMonFilter};
+use crate::{CaptureBackend, Packet, PacketPayload, filter::PktMonFilter};
 
 mod c_api;
 mod c_filter;
@@ -101,20 +101,55 @@ extern "stdcall" fn data_callback(
 
     trace!("Packet type: {:?}", metadata.packet_type);
 
-    // TODO: Allow exposing other packet types in the API
-    if metadata.packet_type != PacketMonitorPacketType::PktMonPayload_Ethernet as u16 {
-        debug!("Packet type is not ethernet, skipping");
-        return;
-    }
-
     let packet_payload =
         unsafe { (descriptor.data as *const u8).add(descriptor.packet_offset as usize) };
     let packet_payload = slice_from_raw_parts(packet_payload, descriptor.packet_length as usize);
-    let mut packet_payload_vec = Vec::new();
-    packet_payload_vec.extend_from_slice(unsafe { &*packet_payload });
+    let mut packet_payload_vector = Vec::new();
+    packet_payload_vector.extend_from_slice(unsafe { &*packet_payload });
 
     let packet = Packet {
-        payload: packet_payload_vec,
+        component_id: metadata.component_id,
+        payload: match PacketMonitorPacketType::try_from(metadata.packet_type) {
+            Ok(packet_type) => match packet_type {
+                PacketMonitorPacketType::PktMonPayload_Unknown => {
+                    PacketPayload::Unknown(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_Ethernet => {
+                    PacketPayload::Ethernet(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_WiFi => {
+                    PacketPayload::WiFi(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_IP => {
+                    PacketPayload::IP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_HTTP => {
+                    PacketPayload::HTTP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_TCP => {
+                    PacketPayload::TCP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_UDP => {
+                    PacketPayload::UDP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_ARP => {
+                    PacketPayload::ARP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_ICMP => {
+                    PacketPayload::ICMP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_ESP => {
+                    PacketPayload::ESP(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_AH => {
+                    PacketPayload::AH(packet_payload_vector)
+                }
+                PacketMonitorPacketType::PktMonPayload_L4Payload => {
+                    PacketPayload::L4Payload(packet_payload_vector)
+                }
+            },
+            Err(()) => PacketPayload::Unknown(packet_payload_vector),
+        },
     };
 
     let sender = context.read().unwrap().sender.clone();
@@ -196,7 +231,7 @@ impl RealTimeBackend {
         (self.api.enum_data_sources)(
             self.handle,
             c_api::PacketMonitorDataSourceKind::PacketMonitorDataSourceKindAll,
-            false,
+            true,
             0,
             &mut bytes_needed,
             std::ptr::null_mut(),
@@ -213,7 +248,7 @@ impl RealTimeBackend {
         (self.api.enum_data_sources)(
             self.handle,
             c_api::PacketMonitorDataSourceKind::PacketMonitorDataSourceKindAll,
-            false,
+            true,
             bytes_needed,
             &mut bytes_needed,
             buffer,
@@ -260,8 +295,13 @@ impl RealTimeBackend {
                 );
 
                 trace!(
-                    "Data source: {:?} - {:?} - id: {} - is_present: {}",
-                    name, description, data_source.id, data_source.is_present
+                    "Data source: {:?} - {:?} - id: {} - secondary_id: {} - parent_id: {} - is_present: {}",
+                    name,
+                    description,
+                    data_source.id,
+                    data_source.secondary_id,
+                    data_source.parent_id,
+                    data_source.is_present
                 );
 
                 result_vec.push(data_source.clone());

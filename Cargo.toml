@@ -5,7 +5,7 @@ default-members = ["."]
 
 [package]
 name = "pktmon"
-version = "0.5.0"
+version = "0.6.0"
 description = "A library for capturing network packets on Windows using the PktMon service"
 license = "MIT"
 authors = ["emmachase <me@its-em.ma>"]
