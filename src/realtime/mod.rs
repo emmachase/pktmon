@@ -101,6 +101,20 @@ extern "stdcall" fn data_callback(
 
     trace!("Packet type: {:?}", metadata.packet_type);
 
+    if descriptor.missed_packet_write_count > 0 {
+        warn!(
+            "missed writing packets!!: {}",
+            descriptor.missed_packet_write_count
+        );
+    }
+
+    if descriptor.missed_packet_read_count > 0 {
+        warn!(
+            "missed reading packets!!: {}",
+            descriptor.missed_packet_read_count
+        );
+    }
+
     let packet_payload =
         unsafe { (descriptor.data as *const u8).add(descriptor.packet_offset as usize) };
     let packet_payload = slice_from_raw_parts(packet_payload, descriptor.packet_length as usize);
@@ -195,8 +209,8 @@ impl RealTimeBackend {
             user_context: context_ptr as *mut c_void,
             event_callback: event_callback as *mut _,
             data_callback: data_callback as *mut _,
-            buffer_size_multiplier: 5, // Idk if this is a good default
-            truncation_size: 9000,     // Max value
+            buffer_size_multiplier: 10, // Idk if this is a good default
+            truncation_size: 9000,      // Max value
         };
 
         let mut stream = c_api::PacketMonitorRealTimeStream::default();

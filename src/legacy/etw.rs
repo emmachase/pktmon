@@ -87,7 +87,7 @@ impl Default for SessionProperties {
 
         session.properties.LogFileMode =
             EVENT_TRACE_INDEPENDENT_SESSION_MODE | EVENT_TRACE_REAL_TIME_MODE;
-        session.properties.BufferSize = 64 * 1024; // 64kb
+        session.properties.BufferSize = 16384; // 16MB
         session.properties.FlushTimer = 1; // 1 second
 
         session.properties.LoggerNameOffset = std::mem::offset_of!(Self, logger_name) as u32;
@@ -709,7 +709,7 @@ unsafe fn get_event_property_value_u32(
             return Err(GetLastError().into());
         }
 
-        Ok(std::mem::transmute(bytes))
+        Ok(u32::from_ne_bytes(bytes))
     }
 }
 
@@ -735,6 +735,6 @@ unsafe fn get_event_property_value_u16(
             return Err(GetLastError().into());
         }
 
-        Ok(std::mem::transmute(bytes))
+        Ok(u16::from_ne_bytes(bytes))
     }
 }

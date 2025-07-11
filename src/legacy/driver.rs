@@ -2,13 +2,13 @@ use std::ffi::c_void;
 use std::mem::transmute;
 
 use log::{debug, trace};
-use windows::core as win;
-use windows::core::s;
 use windows::Win32::Foundation::{GetLastError, HMODULE, NO_ERROR, WIN32_ERROR};
 use windows::Win32::System::LibraryLoader::{FreeLibrary, GetProcAddress, LoadLibraryA};
+use windows::core as win;
+use windows::core::s;
 
-use crate::legacy::c_filter::CPktMonLegacyFilter;
 use crate::filter::PktMonFilter;
+use crate::legacy::c_filter::CPktMonLegacyFilter;
 
 pub struct Driver {
     api: PktMonApi,
@@ -21,7 +21,7 @@ type CPktMonStatus = [u8; 0x103C];
 struct CPktMonStart {
     capture_type: u32, // 1 = All Packets
     _unknown1: u32,
-    mode: u32, // 1 = All, 2 = NICs, 3 = Component List
+    mode: u32,            // 1 = All, 2 = NICs, 3 = Component List
     component_count: u16, // Should be zero if mode is not 3
     _unknown2: u16,
     component_list_ptr: *mut c_void,
@@ -30,7 +30,15 @@ struct CPktMonStart {
 
 impl CPktMonStart {
     fn new() -> Self {
-        Self { capture_type: 1, _unknown1: 0, mode: 1, component_count: 0, _unknown2: 0, component_list_ptr: std::ptr::null_mut(), _unknown3: 0 }
+        Self {
+            capture_type: 1,
+            _unknown1: 0,
+            mode: 1,
+            component_count: 0,
+            _unknown2: 0,
+            component_list_ptr: std::ptr::null_mut(),
+            _unknown3: 0,
+        }
     }
 }
 
@@ -52,7 +60,10 @@ impl Driver {
 
             macro_rules! get_proc_address {
                 ($name:expr) => {
-                    transmute(GetProcAddress(module, s!($name)).ok_or_else(|| win::Error::from(GetLastError()))?)
+                    transmute(
+                        GetProcAddress(module, s!($name))
+                            .ok_or_else(|| win::Error::from(GetLastError()))?,
+                    )
                 };
             }
 
