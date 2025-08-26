@@ -2,7 +2,10 @@ use std::{ffi::OsStr, fmt::Debug, os::windows::ffi::OsStrExt};
 
 use cidr::AnyIpCidr;
 
-use crate::{ctypes::{CIPAddr, CIPv6Addr, CMacAddr}, filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol}};
+use crate::{
+    ctypes::{CIPAddr, CIPv6Addr, CMacAddr},
+    filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol},
+};
 
 /*
  * NOTE: When two MACs, IPs, or ports are specified, the filter
@@ -99,14 +102,12 @@ pub struct CPktMonLegacyFilter {
     _padding3: [u8; 2],
 }
 
-
 impl From<PktMonFilter> for CPktMonLegacyFilter {
     fn from(filter: PktMonFilter) -> Self {
         // Validate we're not mixing IPv4 and IPv6 addresses
         if let OptionPair::Both(ip_src, ip_dst) = filter.ip {
             match (ip_src, ip_dst) {
-                (AnyIpCidr::V4(_), AnyIpCidr::V6(_)) |
-                (AnyIpCidr::V6(_), AnyIpCidr::V4(_)) => {
+                (AnyIpCidr::V4(_), AnyIpCidr::V6(_)) | (AnyIpCidr::V6(_), AnyIpCidr::V4(_)) => {
                     // TODO: Should probably be a Result instead of panicking
                     panic!("Cannot mix IPv4 and IPv6 addresses");
                 }
@@ -115,7 +116,10 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
             }
         }
 
-        let ip_version = if matches!(filter.ip, OptionPair::Some(AnyIpCidr::V6(_)) | OptionPair::Both(AnyIpCidr::V6(_), _)) {
+        let ip_version = if matches!(
+            filter.ip,
+            OptionPair::Some(AnyIpCidr::V6(_)) | OptionPair::Both(AnyIpCidr::V6(_), _)
+        ) {
             1
         } else {
             0
@@ -126,7 +130,7 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
 
             name: {
                 let mut arr = [0u8; 128];
-                
+
                 let mut bytes = OsStr::new(&filter.name)
                     .encode_wide()
                     .flat_map(|x| x.to_le_bytes())
@@ -144,14 +148,14 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
             mac_src: {
                 match filter.mac.first() {
                     Some(&mac) => CMacAddr { addr: mac.0 },
-                    None => CMacAddr { addr: [0; 6] }
+                    None => CMacAddr { addr: [0; 6] },
                 }
             },
 
             mac_dst: {
                 match filter.mac.second() {
                     Some(&mac) => CMacAddr { addr: mac.0 },
-                    None => CMacAddr { addr: [0; 6] }
+                    None => CMacAddr { addr: [0; 6] },
                 }
             },
 
@@ -162,7 +166,7 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
                     0
                 }
             },
-            
+
             protocol: {
                 if let Some(protocol) = filter.data_link_protocol {
                     protocol.into()
@@ -183,29 +187,33 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
 
             ip_src: {
                 match filter.ip.first() {
-                    Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
-                    Some(&ip) => CIPAddr::try_from(ip).unwrap()
+                    Some(AnyIpCidr::Any) | None => CIPAddr {
+                        v6: CIPv6Addr { addr: [0; 8] },
+                    },
+                    Some(&ip) => CIPAddr::try_from(ip).unwrap(),
                 }
             },
 
             ip_dst: {
                 match filter.ip.second() {
-                    Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
-                    Some(&ip) => CIPAddr::try_from(ip).unwrap()
+                    Some(AnyIpCidr::Any) | None => CIPAddr {
+                        v6: CIPv6Addr { addr: [0; 8] },
+                    },
+                    Some(&ip) => CIPAddr::try_from(ip).unwrap(),
                 }
             },
 
             ip_src_prefix: {
                 match filter.ip.first() {
                     Some(AnyIpCidr::Any) | None => 0,
-                    Some(&ip) => ip.network_length().unwrap()
+                    Some(&ip) => ip.network_length().unwrap(),
                 }
             },
 
             ip_dst_prefix: {
                 match filter.ip.second() {
                     Some(AnyIpCidr::Any) | None => 0,
-                    Some(&ip) => ip.network_length().unwrap()
+                    Some(&ip) => ip.network_length().unwrap(),
                 }
             },
 
@@ -238,7 +246,7 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
                     0
                 }
             },
-            
+
             vxlan_port: {
                 if let Encapsulation::On(Some(vxlan_port)) = filter.encapsulation {
                     vxlan_port.0
@@ -248,7 +256,7 @@ impl From<PktMonFilter> for CPktMonLegacyFilter {
             },
 
             heartbeat: filter.heartbeat as u8,
-            
+
             dscp: {
                 if let Some(dscp) = filter.dscp {
                     dscp as u16
@@ -282,17 +290,29 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, mac_dst), 0x88);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, vlan), 0x8E);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, protocol), 0x90);
-        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, transport_proto), 0x92);
+        assert_eq!(
+            std::mem::offset_of!(CPktMonLegacyFilter, transport_proto),
+            0x92
+        );
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_v6), 0x93);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, _padding1), 0x94);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_src), 0x98);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_dst), 0xA8);
-        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_src_prefix), 0xB8);
-        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, ip_dst_prefix), 0xB9);
+        assert_eq!(
+            std::mem::offset_of!(CPktMonLegacyFilter, ip_src_prefix),
+            0xB8
+        );
+        assert_eq!(
+            std::mem::offset_of!(CPktMonLegacyFilter, ip_dst_prefix),
+            0xB9
+        );
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, port_src), 0xBA);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, port_dst), 0xBC);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, tcp_flags), 0xBE);
-        assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, encapsulation), 0xBF);
+        assert_eq!(
+            std::mem::offset_of!(CPktMonLegacyFilter, encapsulation),
+            0xBF
+        );
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, vxlan_port), 0xC0);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, heartbeat), 0xC2);
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, _padding2), 0xC3);
@@ -300,4 +320,3 @@ mod tests {
         assert_eq!(std::mem::offset_of!(CPktMonLegacyFilter, _padding3), 0xC6);
     }
 }
-

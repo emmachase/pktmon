@@ -16,9 +16,7 @@ pub union CIPAddr {
 
 impl Debug for CIPAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        unsafe {
-            write!(f, "IpAddr({:?} or {:?})", self.v4, self.v6)
-        }
+        unsafe { write!(f, "IpAddr({:?} or {:?})", self.v4, self.v6) }
     }
 }
 
@@ -41,7 +39,7 @@ pub struct CIPv4Addr {
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CIPv6Addr {
-    pub addr: [u16; 8]
+    pub addr: [u16; 8],
 }
 
 impl TryFrom<AnyIpCidr> for CIPAddr {
@@ -50,8 +48,17 @@ impl TryFrom<AnyIpCidr> for CIPAddr {
     fn try_from(ip: AnyIpCidr) -> Result<Self, Self::Error> {
         match ip {
             AnyIpCidr::Any => Err(()),
-            AnyIpCidr::V4(ip) => Ok(CIPAddr { v4: CIPv4Addr { addr: ip.first_address().octets(), pad: [0; 12] } }),
-            AnyIpCidr::V6(ip) => Ok(CIPAddr { v6: CIPv6Addr { addr: ip.first_address().segments() } }),
+            AnyIpCidr::V4(ip) => Ok(CIPAddr {
+                v4: CIPv4Addr {
+                    addr: ip.first_address().octets(),
+                    pad: [0; 12],
+                },
+            }),
+            AnyIpCidr::V6(ip) => Ok(CIPAddr {
+                v6: CIPv6Addr {
+                    addr: ip.first_address().segments(),
+                },
+            }),
         }
     }
 }

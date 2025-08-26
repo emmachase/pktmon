@@ -2,7 +2,10 @@ use std::{ffi::OsStr, fmt::Debug, os::windows::ffi::OsStrExt};
 
 use cidr::AnyIpCidr;
 
-use crate::{ctypes::{CIPAddr, CIPv6Addr, CMacAddr}, filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol}};
+use crate::{
+    ctypes::{CIPAddr, CIPv6Addr, CMacAddr},
+    filter::{Encapsulation, OptionPair, PktMonFilter, TransportProtocol},
+};
 
 const PACKETMONITOR_MAX_NAME_LENGTH: usize = 64;
 
@@ -46,7 +49,6 @@ pub struct PacketMonitorProtocolConstraint {
     bytes: u64,
 }
 
-
 #[repr(C)]
 #[derive(Copy, Clone, PartialEq, Eq)]
 struct Flags {
@@ -55,7 +57,9 @@ struct Flags {
 
 impl Debug for Flags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Flags {{ mac_1: {}, mac_2: {}, vlan_id: {}, data_link_protocol: {}, dscp: {}, transport_protocol: {}, ip_src: {}, ip_dst: {}, ip_v6: {}, ip_src_prefix: {}, ip_dst_prefix: {}, port_src: {}, port_dst: {}, tcp_flags: {}, encapsulation: {}, vxlan_port: {}, heartbeat: {} }}", 
+        write!(
+            f,
+            "Flags {{ mac_1: {}, mac_2: {}, vlan_id: {}, data_link_protocol: {}, dscp: {}, transport_protocol: {}, ip_src: {}, ip_dst: {}, ip_v6: {}, ip_src_prefix: {}, ip_dst_prefix: {}, port_src: {}, port_dst: {}, tcp_flags: {}, encapsulation: {}, vxlan_port: {}, heartbeat: {} }}",
             self.mac_1(),
             self.mac_2(),
             self.vlan_id(),
@@ -90,23 +94,57 @@ fn set_bit(value: u32, bit: u32, set: bool) -> u32 {
 }
 
 impl Flags {
-    pub fn mac_1(&self)              -> bool { test_bit(self.raw, 0) }
-    pub fn mac_2(&self)              -> bool { test_bit(self.raw, 1) }
-    pub fn vlan_id(&self)            -> bool { test_bit(self.raw, 2) }
-    pub fn ether_type(&self)         -> bool { test_bit(self.raw, 3) }
-    pub fn dscp(&self)               -> bool { test_bit(self.raw, 4) }
-    pub fn transport_protocol(&self) -> bool { test_bit(self.raw, 5) }
-    pub fn ip_1(&self)               -> bool { test_bit(self.raw, 6) }
-    pub fn ip_2(&self)               -> bool { test_bit(self.raw, 7) }
-    pub fn ip_v6(&self)              -> bool { test_bit(self.raw, 8) }
-    pub fn ip_1_prefix(&self)        -> bool { test_bit(self.raw, 9) }
-    pub fn ip_2_prefix(&self)        -> bool { test_bit(self.raw, 10) }
-    pub fn port_1(&self)             -> bool { test_bit(self.raw, 11) }
-    pub fn port_2(&self)             -> bool { test_bit(self.raw, 12) }
-    pub fn tcp_flags(&self)          -> bool { test_bit(self.raw, 13) }
-    pub fn encap_type(&self)         -> bool { test_bit(self.raw, 14) }
-    pub fn vxlan_port(&self)         -> bool { test_bit(self.raw, 15) }
-    pub fn cluster_heartbeat(&self)  -> bool { test_bit(self.raw, 16) }
+    pub fn mac_1(&self) -> bool {
+        test_bit(self.raw, 0)
+    }
+    pub fn mac_2(&self) -> bool {
+        test_bit(self.raw, 1)
+    }
+    pub fn vlan_id(&self) -> bool {
+        test_bit(self.raw, 2)
+    }
+    pub fn ether_type(&self) -> bool {
+        test_bit(self.raw, 3)
+    }
+    pub fn dscp(&self) -> bool {
+        test_bit(self.raw, 4)
+    }
+    pub fn transport_protocol(&self) -> bool {
+        test_bit(self.raw, 5)
+    }
+    pub fn ip_1(&self) -> bool {
+        test_bit(self.raw, 6)
+    }
+    pub fn ip_2(&self) -> bool {
+        test_bit(self.raw, 7)
+    }
+    pub fn ip_v6(&self) -> bool {
+        test_bit(self.raw, 8)
+    }
+    pub fn ip_1_prefix(&self) -> bool {
+        test_bit(self.raw, 9)
+    }
+    pub fn ip_2_prefix(&self) -> bool {
+        test_bit(self.raw, 10)
+    }
+    pub fn port_1(&self) -> bool {
+        test_bit(self.raw, 11)
+    }
+    pub fn port_2(&self) -> bool {
+        test_bit(self.raw, 12)
+    }
+    pub fn tcp_flags(&self) -> bool {
+        test_bit(self.raw, 13)
+    }
+    pub fn encap_type(&self) -> bool {
+        test_bit(self.raw, 14)
+    }
+    pub fn vxlan_port(&self) -> bool {
+        test_bit(self.raw, 15)
+    }
+    pub fn cluster_heartbeat(&self) -> bool {
+        test_bit(self.raw, 16)
+    }
 
     pub fn set_mac_1(&mut self, set: bool) {
         self.raw = set_bit(self.raw, 0, set);
@@ -184,8 +222,7 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
         // Validate we're not mixing IPv4 and IPv6 addresses
         if let OptionPair::Both(ip_src, ip_dst) = filter.ip {
             match (ip_src, ip_dst) {
-                (AnyIpCidr::V4(_), AnyIpCidr::V6(_)) |
-                (AnyIpCidr::V6(_), AnyIpCidr::V4(_)) => {
+                (AnyIpCidr::V4(_), AnyIpCidr::V6(_)) | (AnyIpCidr::V6(_), AnyIpCidr::V4(_)) => {
                     // TODO: Should probably be a Result instead of panicking
                     panic!("Cannot mix IPv4 and IPv6 addresses");
                 }
@@ -194,7 +231,10 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
             }
         }
 
-        if matches!(filter.ip, OptionPair::Some(AnyIpCidr::V6(_)) | OptionPair::Both(AnyIpCidr::V6(_), _)) {
+        if matches!(
+            filter.ip,
+            OptionPair::Some(AnyIpCidr::V6(_)) | OptionPair::Both(AnyIpCidr::V6(_), _)
+        ) {
             flags.set_ip_v6(true);
         }
 
@@ -205,10 +245,8 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
         PacketMonitorProtocolConstraint {
             name: {
                 let mut arr = [0u16; 64];
-                
-                let mut bytes = OsStr::new(&filter.name)
-                    .encode_wide()
-                    .collect::<Vec<u16>>();
+
+                let mut bytes = OsStr::new(&filter.name).encode_wide().collect::<Vec<u16>>();
 
                 // Leave 1 byte for the NULL terminator
                 if bytes.len() > 63 {
@@ -225,7 +263,7 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
                         flags.set_mac_1(true);
                         CMacAddr { addr: mac.0 }
                     }
-                    None => CMacAddr { addr: [0; 6] }
+                    None => CMacAddr { addr: [0; 6] },
                 }
             },
 
@@ -235,7 +273,7 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
                         flags.set_mac_2(true);
                         CMacAddr { addr: mac.0 }
                     }
-                    None => CMacAddr { addr: [0; 6] }
+                    None => CMacAddr { addr: [0; 6] },
                 }
             },
 
@@ -247,7 +285,7 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
                     0
                 }
             },
-            
+
             ether_type: {
                 if let Some(ether_type) = filter.data_link_protocol {
                     flags.set_ether_type(true);
@@ -277,7 +315,9 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
 
             ip_1: {
                 match filter.ip.first() {
-                    Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
+                    Some(AnyIpCidr::Any) | None => CIPAddr {
+                        v6: CIPv6Addr { addr: [0; 8] },
+                    },
                     Some(&ip) => {
                         flags.set_ip_1(true);
                         CIPAddr::try_from(ip).unwrap()
@@ -287,7 +327,9 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
 
             ip_2: {
                 match filter.ip.second() {
-                    Some(AnyIpCidr::Any) | None => CIPAddr { v6: CIPv6Addr { addr: [0; 8] } },
+                    Some(AnyIpCidr::Any) | None => CIPAddr {
+                        v6: CIPv6Addr { addr: [0; 8] },
+                    },
                     Some(&ip) => {
                         flags.set_ip_2(true);
                         CIPAddr::try_from(ip).unwrap()
@@ -352,7 +394,7 @@ impl From<PktMonFilter> for PacketMonitorProtocolConstraint {
                     0
                 }
             },
-            
+
             vxlan_port: {
                 if let Encapsulation::On(Some(vxlan_port)) = filter.encapsulation {
                     flags.set_vxlan_port(true);

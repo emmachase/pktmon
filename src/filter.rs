@@ -10,23 +10,23 @@ use cidr::AnyIpCidr;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PktMonFilter {
     /// Name of the filter.
-    /// 
+    ///
     /// Max length is 63 characters.
     /// Driver will truncate to 63 characters if longer.
     pub name: String,
 
     /// Match by source MAC address.
-    /// 
+    ///
     /// See [`OptionPair`] for more information.
     pub mac: OptionPair<MacAddr>,
 
     /// Match by source IP address.
-    /// 
+    ///
     /// See [`OptionPair`] for more information.
     pub ip: OptionPair<AnyIpCidr>,
 
     /// Match by source port.
-    /// 
+    ///
     /// See [`OptionPair`] for more information.
     pub port: OptionPair<u16>,
 
@@ -38,7 +38,7 @@ pub struct PktMonFilter {
 
     /// Match by data link (layer 2) protocol. Can be IPv4, IPv6, ARP, or a protocol number.
     pub data_link_protocol: Option<DataLinkProtocol>,
-    
+
     /// Match by transport (layer 4) protocol. Can be TCP, UDP, ICMP, ICMPv6, or a protocol number.
     ///  To further filter TCP packets, an optional list of TCP flags to match can
     ///  be provided. Supported flags are FIN, SYN, RST, PSH, ACK, URG, ECE, and CWR.
@@ -73,7 +73,7 @@ impl Default for PktMonFilter {
 ///
 /// Represents None, Some, or Both values.
 /// If Both are present, the filter will only match packets that contain both values, NOT either.
-/// 
+///
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptionPair<T> {
     None,

@@ -125,7 +125,7 @@ pub(crate) trait CaptureBackend: Debug + Send {
     fn try_next_packet(&self) -> Result<Packet, TryRecvError>;
 
     #[cfg(feature = "tokio")]
-    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>);
+    fn notify(&self) -> Option<std::sync::Arc<tokio::sync::Notify>>;
 }
 
 #[derive(Debug)]
@@ -173,8 +173,8 @@ impl CaptureBackend for DispatchCaptureBackend {
     }
 
     #[cfg(feature = "tokio")]
-    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
-        dispatch!(self, set_notify(notify))
+    fn notify(&self) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        dispatch!(self, notify())
     }
 }
 

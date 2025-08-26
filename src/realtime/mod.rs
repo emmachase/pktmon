@@ -3,7 +3,7 @@ use std::{
     ffi::{OsString, c_void},
     os::windows::ffi::OsStringExt,
     ptr::slice_from_raw_parts,
-    sync::{RwLock, mpsc},
+    sync::mpsc,
     time::Duration,
 };
 
@@ -24,7 +24,7 @@ struct MonitorContext {
     notify: Option<std::sync::Weak<tokio::sync::Notify>>,
 }
 
-type UserContext = *mut RwLock<MonitorContext>;
+type UserContext = *mut MonitorContext;
 
 #[derive(Debug)]
 pub struct RealTimeBackend {
@@ -37,7 +37,10 @@ pub struct RealTimeBackend {
     receiver: mpsc::Receiver<Packet>,
 
     #[allow(dead_code)]
-    context: Box<RwLock<MonitorContext>>,
+    context: Box<MonitorContext>,
+
+    #[cfg(feature = "tokio")]
+    notify: Option<std::sync::Arc<tokio::sync::Notify>>,
 
     loaded: bool,
 }
@@ -90,6 +93,7 @@ extern "stdcall" fn data_callback(
     context: *mut c_void,
     data: *const c_api::PacketMonitorStreamDataDescriptor,
 ) {
+    let start = std::time::Instant::now();
     let context = unsafe { &mut *(context as UserContext) };
 
     let descriptor = unsafe { &(*data) };
@@ -120,6 +124,8 @@ extern "stdcall" fn data_callback(
     let packet_payload = slice_from_raw_parts(packet_payload, descriptor.packet_length as usize);
     let mut packet_payload_vector = Vec::new();
     packet_payload_vector.extend_from_slice(unsafe { &*packet_payload });
+
+    // trace!("Cloned time: {:?}", start.elapsed().as_nanos());
 
     let packet = Packet {
         component_id: metadata.component_id,
@@ -166,20 +172,27 @@ extern "stdcall" fn data_callback(
         },
     };
 
-    let sender = context.read().unwrap().sender.clone();
-    sender.send(packet).unwrap();
+    // let sender = context.sender.clone();
+    // trace!("lock time: {:?}", start.elapsed().as_nanos());
+    context.sender.send(packet).unwrap();
+    // trace!("send time: {:?}", start.elapsed().as_nanos());
 
     #[cfg(feature = "tokio")]
-    if let Some(ref notify) = context.read().unwrap().notify {
+    if let Some(ref notify) = context.notify {
         if let Some(notify) = notify.upgrade() {
             notify.notify_one();
         }
     }
+
+    trace!("Total time: {:?}", start.elapsed().as_nanos());
 }
 
 impl RealTimeBackend {
     pub fn new() -> std::io::Result<Self> {
         let api = c_api::PacketMonitorApi::new()?;
+
+        #[cfg(feature = "tokio")]
+        let notify = Some(std::sync::Arc::new(tokio::sync::Notify::new()));
 
         let mut handle = c_api::PacketMonitorHandle::default();
         (api.initialize)(
@@ -197,12 +210,12 @@ impl RealTimeBackend {
 
         let (sender, receiver) = mpsc::channel();
 
-        let context_box = Box::new(RwLock::new(MonitorContext {
+        let context_box = Box::new(MonitorContext {
             sender,
 
             #[cfg(feature = "tokio")]
-            notify: None,
-        }));
+            notify: notify.clone().map(|n| std::sync::Arc::downgrade(&n)),
+        });
         let context_ptr = &*context_box as *const _;
 
         let stream_config = c_api::PacketMonitorRealTimeStreamConfiguration {
@@ -230,6 +243,9 @@ impl RealTimeBackend {
             context: context_box,
 
             receiver,
+
+            #[cfg(feature = "tokio")]
+            notify,
 
             loaded: true,
         })
@@ -384,8 +400,8 @@ impl CaptureBackend for RealTimeBackend {
     }
 
     #[cfg(feature = "tokio")]
-    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
-        self.context.write().unwrap().notify = Some(std::sync::Arc::downgrade(&notify));
+    fn notify(&self) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        self.notify.clone()
     }
 }
 

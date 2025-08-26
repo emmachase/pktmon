@@ -1,6 +1,16 @@
-use std::{sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, thread, time::Duration};
+use std::{
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread,
+    time::Duration,
+};
 
-use pktmon::{filter::{PktMonFilter, TransportProtocol}, Capture};
+use pktmon::{
+    Capture,
+    filter::{PktMonFilter, TransportProtocol},
+};
 
 fn main() {
     colog::default_builder()
@@ -9,12 +19,14 @@ fn main() {
 
     let mut sniffer = Capture::new().unwrap();
 
-    sniffer.add_filter(PktMonFilter {
-        name: "UDP Traffic".to_string(),
-        transport_protocol: Some(TransportProtocol::UDP),
+    sniffer
+        .add_filter(PktMonFilter {
+            name: "UDP Traffic".to_string(),
+            transport_protocol: Some(TransportProtocol::UDP),
 
-        ..PktMonFilter::default()
-    }).unwrap();
+            ..PktMonFilter::default()
+        })
+        .unwrap();
 
     sniffer.start().unwrap();
 

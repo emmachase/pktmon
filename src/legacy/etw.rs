@@ -249,7 +249,9 @@ pub struct EtwConsumer {
 }
 
 impl EtwConsumer {
-    pub fn new() -> win::Result<(Self, Receiver<Packet>)> {
+    pub fn new(
+        #[cfg(feature = "tokio")] notify: Option<std::sync::Arc<tokio::sync::Notify>>,
+    ) -> win::Result<(Self, Receiver<Packet>)> {
         let mut trace = EVENT_TRACE_LOGFILEA::default();
         trace.LoggerName = PSTR::from_raw(LOGGER_NAME.0 as *mut u8);
         trace.Anonymous1.ProcessTraceMode =
@@ -265,7 +267,7 @@ impl EtwConsumer {
             sender,
 
             #[cfg(feature = "tokio")]
-            notify: None,
+            notify: notify.map(|n| std::sync::Arc::downgrade(&n)),
         }));
         let context_ptr = &mut *boxed as *mut RwLock<ConsumerContext>; // Really yucky
 
@@ -328,11 +330,6 @@ impl EtwConsumer {
         }
 
         Ok(())
-    }
-
-    #[cfg(feature = "tokio")]
-    pub fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
-        self.context.write().unwrap().notify = Some(std::sync::Arc::downgrade(&notify));
     }
 
     pub extern "system" fn event_record_callback(event_record: *mut EVENT_RECORD) {

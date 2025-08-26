@@ -1,14 +1,19 @@
-use std::{fmt::Debug, io, sync::mpsc::{Receiver, RecvError, RecvTimeoutError, TryRecvError}, time::Duration};
+use std::{
+    fmt::Debug,
+    io,
+    sync::mpsc::{Receiver, RecvError, RecvTimeoutError, TryRecvError},
+    time::Duration,
+};
 
 use driver::Driver;
 use etw::{EtwConsumer, EtwSession};
 use log::{debug, info};
 
-use crate::{filter::PktMonFilter, CaptureBackend, Packet};
+use crate::{CaptureBackend, Packet, filter::PktMonFilter};
 
-mod etw;
 mod c_filter;
 mod driver;
+mod etw;
 
 pub use etw::EtlConsumer;
 
@@ -18,6 +23,8 @@ pub struct LegacyBackend {
     consumer: Option<EtwConsumer>,
     receiver: Option<Receiver<Packet>>,
     running: bool,
+    #[cfg(feature = "tokio")]
+    notify: Option<std::sync::Arc<tokio::sync::Notify>>,
 }
 
 impl Debug for LegacyBackend {
@@ -28,22 +35,25 @@ impl Debug for LegacyBackend {
 
 impl LegacyBackend {
     /// Create a new capture instance.
-    /// 
+    ///
     /// Loads the PktMon driver and creates an ETW session.
     pub fn new() -> io::Result<Self> {
-        Ok(Self { 
+        Ok(Self {
             driver: Driver::new()?,
             etw: EtwSession::new()?,
             consumer: None,
             receiver: None,
             running: false,
+
+            #[cfg(feature = "tokio")]
+            notify: Some(std::sync::Arc::new(tokio::sync::Notify::new())),
         })
     }
 }
 
 impl CaptureBackend for LegacyBackend {
     /// Start the capture.
-    /// 
+    ///
     /// Ensure to add filters before starting the capture.
     fn start(&mut self) -> io::Result<()> {
         if self.running {
@@ -54,7 +64,12 @@ impl CaptureBackend for LegacyBackend {
 
         self.etw.activate()?;
 
+        #[cfg(feature = "tokio")]
+        let (consumer, receiver) = EtwConsumer::new(self.notify.clone())?;
+
+        #[cfg(not(feature = "tokio"))]
         let (consumer, receiver) = EtwConsumer::new()?;
+
         self.consumer = Some(consumer);
         self.receiver = Some(receiver);
 
@@ -62,12 +77,12 @@ impl CaptureBackend for LegacyBackend {
         self.running = true;
 
         info!("Capture started");
-        
+
         Ok(())
     }
 
     /// Stop the capture.
-    /// 
+    ///
     /// You may still receive packets after stopping the capture.
     fn stop(&mut self) -> io::Result<()> {
         if !self.running {
@@ -79,7 +94,7 @@ impl CaptureBackend for LegacyBackend {
         self.running = false;
         self.driver.stop_capture()?;
         self.etw.deactivate()?;
-        
+
         if let Some(mut consumer) = self.consumer.take() {
             consumer.stop()?;
         }
@@ -92,7 +107,7 @@ impl CaptureBackend for LegacyBackend {
     }
 
     /// Unload the PktMon driver.
-    /// 
+    ///
     /// This will ensure the driver isn't used after this.
     fn unload(&mut self) -> io::Result<()> {
         Driver::unload(&self.driver)?;
@@ -107,7 +122,7 @@ impl CaptureBackend for LegacyBackend {
     }
 
     /// Get the next packet from the capture.
-    /// 
+    ///
     /// Returns an error if the capture isn't running.
     fn next_packet(&self) -> Result<Packet, RecvError> {
         if let Some(ref receiver) = self.receiver {
@@ -118,7 +133,7 @@ impl CaptureBackend for LegacyBackend {
     }
 
     /// Get the next packet from the capture with a timeout.
-    /// 
+    ///
     /// Returns an error if the capture isn't running or if the timeout is reached.
     fn next_packet_timeout(&self, timeout: Duration) -> Result<Packet, RecvTimeoutError> {
         if let Some(ref receiver) = self.receiver {
@@ -137,11 +152,7 @@ impl CaptureBackend for LegacyBackend {
     }
 
     #[cfg(feature = "tokio")]
-    /// Set a notify to be notified when a packet is received.
-    /// This call is ONLY valid AFTER the capture has been started.
-    /// 
-    /// This is only available if the `tokio` feature is enabled.
-    fn set_notify(&mut self, notify: std::sync::Arc<tokio::sync::Notify>) {
-        self.consumer.as_mut().expect("Consumer not initialized").set_notify(notify);
+    fn notify(&self) -> Option<std::sync::Arc<tokio::sync::Notify>> {
+        self.notify.clone()
     }
 }
