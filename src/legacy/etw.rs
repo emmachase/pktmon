@@ -110,7 +110,7 @@ impl EtwSession {
 
         unsafe {
             debug!("Closing any orphaned EtwSession...");
-            session.close()?; // Ensure any previously orphaned session is closed
+            Self::default().close()?; // Ensure any previously orphaned session is closed
 
             debug!("Starting EtwSession");
 
