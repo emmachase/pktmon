@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "pktmon"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "async-stream",
  "cidr",
