@@ -19,6 +19,7 @@ use super::c_filter::PacketMonitorProtocolConstraint;
 #[derive(Copy, Clone, Debug)]
 pub struct SendHandle(pub *mut c_void);
 unsafe impl Send for SendHandle {}
+unsafe impl Sync for SendHandle {}
 impl Default for SendHandle {
     fn default() -> Self {
         Self(std::ptr::null_mut())

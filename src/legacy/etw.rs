@@ -182,7 +182,7 @@ impl EtwSession {
         Ok(())
     }
 
-    fn close(&mut self) -> win::Result<()> {
+    pub fn close(&mut self) -> win::Result<()> {
         debug!("Closing EtwSession...");
 
         unsafe {

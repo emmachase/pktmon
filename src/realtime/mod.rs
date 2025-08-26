@@ -11,7 +11,9 @@ use c_api::{PacketMonitorDataSourceList, PacketMonitorPacketType};
 use log::{debug, error, info, trace, warn};
 use windows::w;
 
-use crate::{CaptureBackend, Packet, PacketPayload, filter::PktMonFilter};
+use crate::{
+    CaptureBackend, Packet, PacketPayload, filter::PktMonFilter, util::install_shutdown_hook,
+};
 
 mod c_api;
 mod c_filter;
@@ -230,6 +232,14 @@ impl RealTimeBackend {
         (api.create_realtime_stream)(handle, &stream_config, &mut stream).ok()?;
 
         trace!("Created stream {:?}", stream);
+
+        install_shutdown_hook(move || {
+            if let Ok(api) = c_api::PacketMonitorApi::new() {
+                (api.close_realtime_stream)(stream);
+                (api.close_session_handle)(session);
+                (api.uninitialize)(handle);
+            }
+        });
 
         (api.attach_output_to_session)(session, stream).ok()?;
 

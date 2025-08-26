@@ -9,7 +9,7 @@ use driver::Driver;
 use etw::{EtwConsumer, EtwSession};
 use log::{debug, info};
 
-use crate::{CaptureBackend, Packet, filter::PktMonFilter};
+use crate::{CaptureBackend, Packet, filter::PktMonFilter, util::install_shutdown_hook};
 
 mod c_filter;
 mod driver;
@@ -38,6 +38,13 @@ impl LegacyBackend {
     ///
     /// Loads the PktMon driver and creates an ETW session.
     pub fn new() -> io::Result<Self> {
+        install_shutdown_hook(|| {
+            EtwSession::default().close().ok();
+            if let Ok(driver) = Driver::new() {
+                driver.unload().ok();
+            }
+        });
+
         Ok(Self {
             driver: Driver::new()?,
             etw: EtwSession::new()?,
